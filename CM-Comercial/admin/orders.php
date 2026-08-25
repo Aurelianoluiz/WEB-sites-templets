@@ -8,11 +8,8 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   $status=$_POST['status']; $pdo=db();
   $st=$pdo->prepare('SELECT status,payment_status FROM orders WHERE id=? LIMIT 1'); $st->execute([$id]); $current=$st->fetch();
   if(!$current){ redirect('orders.php?error=notfound'); }
-  $from=$current['status'];
-  $fromIndex=array_search($from,$statusFlow,true); $toIndex=array_search($status,$statusFlow,true);
-  $validCancel=($status==='cancelled' && in_array($from,['pending','confirmed','preparing'],true));
-  $validForward=($fromIndex!==false && $toIndex!==false && $toIndex===$fromIndex+1);
-  if(!$validCancel && !$validForward){ redirect('orders.php?error=transition'); }
+  $from=(string)$current['status'];
+  if(!valid_order_transition($from,$status)){ redirect('orders.php?error=transition'); }
   try{
     $pdo->beginTransaction();
     if($status==='cancelled'){
@@ -23,6 +20,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       foreach($items->fetchAll() as $item){ $qty=(int)$item['qty']; if($qty<1) continue; $add->execute([$qty,(int)$item['product_id']]); $move->execute([(int)$item['product_id'],'in',$qty,'Estorno administrativo do pedido #'.$id,(int)user()['id']]); }
     }
     $pdo->prepare('UPDATE orders SET status=? WHERE id=?')->execute([$status,$id]);
+    record_order_status_change($id,$from,$status,(int)user()['id'],'Alteração pelo painel de pedidos');
     $pdo->commit(); redirect('orders.php?saved=1');
   }catch(Throwable $e){ if($pdo->inTransaction()) $pdo->rollBack(); redirect('orders.php?error=save'); }
  }
