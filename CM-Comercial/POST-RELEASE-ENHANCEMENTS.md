@@ -46,7 +46,16 @@ Esta atualização continua o desenvolvimento a partir do ponto de restauração
 - Falhas de atualização fazem rollback e nenhuma alteração parcial é mantida.
 - A listagem administrativa (`admin/orders.php`) agora aplica as mesmas regras do detalhe do pedido, evitando que o fluxo seja contornado pelo seletor rápido.
 
+### 7. Histórico de status do pedido — NOVO
+- Criada a tabela `order_status_history` de forma idempotente no bootstrap do banco.
+- Cada alteração de status feita pelo administrador registra status anterior e novo status.
+- O registro identifica o usuário responsável, data/hora e origem da alteração.
+- A função central `valid_order_transition()` passa a ser a regra única das transições permitidas.
+- O registro do histórico ocorre dentro da mesma transação da alteração do pedido.
+- Se a transação falhar, tanto a alteração do pedido quanto o histórico são revertidos.
+
 ## Validação
+- `config.php` validado com `php -l`: OK.
 - `admin/orders.php` validado com `php -l`: OK.
 - O fluxo real com SQLite continua dependente do driver `pdo_sqlite` no servidor.
 
