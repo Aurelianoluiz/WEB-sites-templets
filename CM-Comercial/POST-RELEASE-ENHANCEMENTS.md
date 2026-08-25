@@ -29,10 +29,21 @@ Esta atualização continua o desenvolvimento a partir do ponto de restauração
 - Payloads excessivos são rejeitados.
 - Cotação usa os valores atuais do banco, não os preços enviados pelo navegador.
 
+### 5. Cancelamento seguro de pedidos
+- Cliente pode cancelar somente pedidos `pending` ou `confirmed`.
+- Cancelamento é bloqueado quando `payment_status=paid`.
+- A operação exige CSRF e revalidação do pedido no banco.
+- O estoque dos itens é estornado dentro da mesma transação.
+- Cada estorno gera `stock_movements` com o motivo e o usuário.
+- Pedidos de outros usuários não podem ser alterados.
+
 ## Validação
-- 33 arquivos PHP validados com `php -l`: OK.
+- Arquivos PHP alterados validados com `php -l`: OK.
 - `js/app.js` validado com `node --check`: OK.
 - O fluxo real com SQLite continua dependente do driver `pdo_sqlite` no servidor.
+
+## Política de backup
+Conforme orientação do responsável pelo projeto, **novos pontos de backup só serão criados quando solicitados explicitamente**.
 
 ## Rollback
 O ponto anterior continua disponível em `CM-Comercial-BACKUP-2026-08-25_14-22-19.zip`.
