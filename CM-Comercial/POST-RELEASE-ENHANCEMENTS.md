@@ -37,8 +37,16 @@ Esta atualização continua o desenvolvimento a partir do ponto de restauração
 - Cada estorno gera `stock_movements` com o motivo e o usuário.
 - Pedidos de outros usuários não podem ser alterados.
 
+### 6. Fluxo administrativo de pedidos
+- O administrador não pode mover um pedido para um status anterior do fluxo.
+- Pedido `cancelled` não pode retornar ao fluxo normal.
+- Pedido `delivered` não pode ser cancelado pelo painel.
+- Cancelamento administrativo também estorna o estoque dentro da mesma transação.
+- Cada estorno administrativo gera auditoria em `stock_movements`.
+- Falhas de atualização fazem rollback e nenhuma alteração parcial é mantida.
+
 ## Validação
-- Arquivos PHP alterados validados com `php -l`: OK.
+- 33 arquivos PHP validados com `php -l`: OK.
 - `js/app.js` validado com `node --check`: OK.
 - O fluxo real com SQLite continua dependente do driver `pdo_sqlite` no servidor.
 
