@@ -60,6 +60,7 @@ function db(): PDO {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     $pdo->exec('PRAGMA foreign_keys = ON');
+    $pdo->exec("CREATE TABLE IF NOT EXISTS order_status_history (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, from_status TEXT DEFAULT '', to_status TEXT NOT NULL, actor_user_id INTEGER, note TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE, FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE SET NULL)");
     return $pdo;
 }
 
@@ -88,3 +89,20 @@ function calculate_shipping(string $method, string $zip, string $state, float $s
 }
 function slugify(string $value): string { $value=trim($value); $value=iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$value)?:$value; $value=strtolower($value); $value=preg_replace('/[^a-z0-9]+/','-',$value)??''; return trim($value,'-')?:'produto'; }
 function product_image(array $product): string { return trim((string)($product['image'] ?? '')) ?: 'assets/product-placeholder.svg'; }
+function record_order_status_change(int $orderId, string $from, string $to, ?int $actorUserId = null, string $note = ''): void {
+    if ($from === $to) return;
+    $st = db()->prepare('INSERT INTO order_status_history(order_id,from_status,to_status,actor_user_id,note) VALUES(?,?,?,?,?)');
+    $st->execute([$orderId, $from, $to, $actorUserId, $note]);
+}
+function valid_order_transition(string $from, string $to): bool {
+    if ($from === $to) return true;
+    $map = [
+        'pending' => ['confirmed','cancelled'],
+        'confirmed' => ['preparing','cancelled'],
+        'preparing' => ['shipped','cancelled'],
+        'shipped' => ['delivered'],
+        'delivered' => [],
+        'cancelled' => [],
+    ];
+    return in_array($to, $map[$from] ?? [], true);
+}
