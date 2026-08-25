@@ -44,10 +44,10 @@ Esta atualização continua o desenvolvimento a partir do ponto de restauração
 - Cancelamento administrativo também estorna o estoque dentro da mesma transação.
 - Cada estorno administrativo gera auditoria em `stock_movements`.
 - Falhas de atualização fazem rollback e nenhuma alteração parcial é mantida.
+- A listagem administrativa (`admin/orders.php`) agora aplica as mesmas regras do detalhe do pedido, evitando que o fluxo seja contornado pelo seletor rápido.
 
 ## Validação
-- 33 arquivos PHP validados com `php -l`: OK.
-- `js/app.js` validado com `node --check`: OK.
+- `admin/orders.php` validado com `php -l`: OK.
 - O fluxo real com SQLite continua dependente do driver `pdo_sqlite` no servidor.
 
 ## Política de backup
