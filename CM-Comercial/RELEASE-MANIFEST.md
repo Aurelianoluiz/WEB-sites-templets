@@ -1,33 +1,47 @@
 # CM Comercial — Release Manifest
 
-Release: Final v2
-Data: 2026-08-25
+## Estado atual
 
-## Validação local
-- PHP: `php -l` em todos os arquivos PHP — OK.
-- Node.js: `node --check js/app.js` — OK.
-- Pacote ZIP: aproximadamente 1.9 MB.
-- Arquivos no pacote: 55.
-- SHA-256 do pacote `cm-comercial-final-completo-v2.zip`: `ec9c84a7888f1b5b110456f65d78c4c34eb1063443990e675d344c86c67471d8`.
+- Data: 2026-08-27
+- Branch de origem: `main`
+- Estado: Release Candidate / homologação final
+- Desenvolvimento técnico: concluído conforme `ETAPAS-FASES.md`.
 
-## Conteúdo principal
-- Aplicação PHP/HTML5/CSS3/JavaScript.
-- Área de cliente e área administrativa separadas.
-- Catálogo, categorias, busca e produto.
-- Carrinho, checkout e pedidos.
-- Estoque e auditoria.
-- Frete/regras de entrega.
-- Arquitetura de pagamento externo.
-- Segurança, SEO, acessibilidade e responsividade.
-- Logo em `assets/logo.png`.
-- Documentação completa das 17 fases.
-- Checklist de produção e relatório de testes.
+## Validações registradas
 
-## Estado de produção
-O desenvolvimento técnico está concluído. A publicação comercial ainda depende de infraestrutura e credenciais externas: hospedagem PHP, domínio/DNS, HTTPS, gateway de pagamento, serviço de frete/CEP, SMTP e configuração de backup. Esses itens não são marcados como concluídos sem teste real.
+- Pacote anterior teve 12 arquivos PHP analisados e 12/12 passaram no `php -l`.
+- CI de PHP está configurada para PHP 8.2, 8.3 e 8.4.
+- Testes financeiros, integração, segurança e release gate estão versionados.
 
-## Fases
-1 a 17 — concluídas tecnicamente. Consulte `ETAPAS-FASES.md`.
+## Gates ainda dependentes de ambiente
 
-## Fonte da release
-O ZIP entregue nesta conversa é a fonte completa de release para deploy. O repositório mantém a documentação e os arquivos de texto disponíveis pela integração GitHub; o logo PNG e demais binários devem ser preservados pelo pacote de release até que um fluxo de upload binário apropriado seja usado.
+- execução real da CI;
+- banco configurado;
+- E2E em servidor de homologação;
+- Mercado Pago Sandbox e webhook HTTPS;
+- captura/estorno em sandbox;
+- validação de HTTPS, cookies e headers;
+- observabilidade e retenção de logs;
+- backup externo do banco.
+
+## Conteúdo de distribuição
+
+O ZIP final deve incluir os arquivos necessários de `CM-Comercial/` e excluir:
+
+- `.env` e segredos;
+- bancos de desenvolvimento temporários;
+- logs gerados;
+- artefatos temporários de CI.
+
+## Integridade do ZIP final
+
+Preencher somente no empacotamento definitivo:
+
+- nome do arquivo;
+- data/hora;
+- SHA-256;
+- commit de origem.
+
+## Regra
+
+Este manifesto não é, por si só, aprovação para produção nem substitui a execução dos gates dependentes de ambiente.
