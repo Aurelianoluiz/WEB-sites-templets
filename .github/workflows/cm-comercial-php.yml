@@ -1,6 +1,7 @@
 name: CM Comercial PHP Validation
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'CM-Comercial/**'
@@ -35,8 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t files < <(find CM-Comercial -type f -name '*.php' \
-            ! -path 'CM-Comercial/.git/*')
+          mapfile -t files < <(find CM-Comercial -type f -name '*.php' ! -path 'CM-Comercial/.git/*')
           if [ "${#files[@]}" -eq 0 ]; then
             echo 'No PHP files found.'
             exit 1
@@ -49,21 +49,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for test in \
-            CM-Comercial/tests/payment_core_test.php \
-            CM-Comercial/tests/payment_service_test.php \
-            CM-Comercial/tests/customer_financial_history_test.php \
-            CM-Comercial/tests/integration_suite.php; do
+          tests=(
+            CM-Comercial/tests/payment_core_test.php
+            CM-Comercial/tests/payment_service_test.php
+            CM-Comercial/tests/customer_financial_history_test.php
+            CM-Comercial/tests/integration_suite.php
+            CM-Comercial/tests/security_audit.php
+          )
+          ran=0
+          for test in "${tests[@]}"; do
             if [ -f "$test" ]; then
               echo "Running $test"
               php "$test"
+              ran=1
             fi
           done
-
-      - name: Run security audit when dependencies are present
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f CM-Comercial/tests/security_audit.php ]; then
-            php CM-Comercial/tests/security_audit.php
+          if [ "$ran" -eq 0 ]; then
+            echo 'No automated tests found.'
+            exit 1
           fi
