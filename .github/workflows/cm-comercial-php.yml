@@ -41,9 +41,7 @@ jobs:
             echo 'No PHP files found.'
             exit 1
           fi
-          for file in "${files[@]}"; do
-            php -l "$file"
-          done
+          for file in "${files[@]}"; do php -l "$file"; done
 
       - name: Run isolated domain tests
         shell: bash
@@ -54,7 +52,6 @@ jobs:
             CM-Comercial/tests/payment_service_test.php
             CM-Comercial/tests/customer_financial_history_test.php
             CM-Comercial/tests/integration_suite.php
-            CM-Comercial/tests/security_audit.php
           )
           ran=0
           for test in "${tests[@]}"; do
@@ -65,6 +62,19 @@ jobs:
             fi
           done
           if [ "$ran" -eq 0 ]; then
-            echo 'No automated tests found.'
+            echo 'No automated domain tests found.'
             exit 1
           fi
+
+      - name: Security audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f CM-Comercial/tests/security_audit.php
+          php CM-Comercial/tests/security_audit.php
+
+      - name: Release gate assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          php CM-Comercial/tests/release_gate.php
