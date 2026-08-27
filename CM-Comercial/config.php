@@ -34,6 +34,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
+// Centraliza CSRF e evita definições duplicadas entre config e includes.
+require_once __DIR__ . '/includes/csrf.php';
+
 function security_headers(): void {
     if (headers_sent()) return;
     header('X-Content-Type-Options: nosniff');
@@ -72,8 +75,6 @@ function is_admin(): bool { return is_logged_in() && (user()['role'] ?? '') === 
 function require_login(): void { if (!is_logged_in()) redirect('login.php'); }
 function require_admin(): void { if (!is_admin()) { http_response_code(403); include __DIR__ . '/403.php'; exit; } }
 function redirect(string $path): never { header('Location: ' . $path); exit; }
-function csrf_token(): string { if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32)); return $_SESSION['csrf']; }
-function verify_csrf(): void { if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) { http_response_code(419); exit('Token de segurança inválido. Recarregue a página e tente novamente.'); } }
 function shipping_methods(): array { return db()->query('SELECT * FROM shipping_methods WHERE active=1 ORDER BY id')->fetchAll(); }
 function shipping_method_active(string $code): bool { $s = db()->prepare('SELECT active FROM shipping_methods WHERE code=? LIMIT 1'); $s->execute([$code]); return (bool)$s->fetchColumn(); }
 function calculate_shipping(string $method, string $zip, string $state, float $subtotal): array {
