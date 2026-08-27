@@ -23,7 +23,15 @@ function initiate_checkout_payment(PDO $pdo, int $orderId, float $amount, string
             $result = $adapter->createPayment($order, $customer, array_merge($paymentData, ['method' => $method]));
             $paymentStatus = (string)($result['status'] ?? 'pending');
             $gatewayData = (array)($result['raw'] ?? []);
-            apply_gateway_event($pdo, $paymentId, 'checkout-' . $paymentId . '-' . hash('sha256', json_encode($result)), 'checkout.initiated', $paymentStatus, $result['transaction_id'] ?? null, $gatewayData);
+            apply_gateway_event(
+                $pdo,
+                $paymentId,
+                'checkout-' . $paymentId . '-' . hash('sha256', json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
+                'checkout.initiated',
+                $paymentStatus,
+                $result['transaction_id'] ?? null,
+                $gatewayData
+            );
         } catch (Throwable $e) {
             error_log('[checkout_payment] gateway initialization failed: ' . $e->getMessage());
             $paymentStatus = 'pending';
@@ -91,6 +99,28 @@ function build_payment_response(int $paymentId, string $paymentStatus, array $de
         'no_change' => 'Pedido registrado. Aguardando confirmação do pagamento.',
     ];
     $pix = [];
-    if (!empty($gatewayData['pix_qr_code'])) $pix = ['qr_code' => $gatewayData['pix_qr_code'], 'qr_code_base64' => $gatewayData['pix_qr_code_base64'] ?? '', 'expires_at' => $gatewayData['pix_expiration'] ?? ''];
-    return ['success' => in_array($action, ['confirm_order','no_change'], true), 'payment_id' => $paymentId, 'payment_status' => $paymentStatus, 'order_action' => $action, 'redirect' => 'order.php?id=' . $orderId, 'message' => $messages[$action] ?? 'Pedido registrado.', 'gateway_data' => $gatewayData, 'pix' => $pix];
+    if (!empty($gatewayData['pix_qr_code'])) {
+        $pix = [
+            'qr_code' => $gatewayData['pix_qr_code'],
+            'qr_code_base64' => $gatewayData['pix_qr_code_base64'] ?? '',
+            'expires_at' => $gatewayData['pix_expiration'] ?? '',
+        ];
+    }
+
+    // Never expose the gateway's raw response. Only safe, normalized fields are returned.
+    $safeGateway = [
+        'status' => $paymentStatus,
+        'transaction_id' => $gatewayData['transaction_id'] ?? null,
+    ];
+
+    return [
+        'success' => in_array($action, ['confirm_order', 'no_change'], true),
+        'payment_id' => $paymentId,
+        'payment_status' => $paymentStatus,
+        'order_action' => $action,
+        'redirect' => 'order.php?id=' . $orderId,
+        'message' => $messages[$action] ?? 'Pedido registrado.',
+        'gateway_data' => $safeGateway,
+        'pix' => $pix,
+    ];
 }
