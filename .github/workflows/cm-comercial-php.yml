@@ -51,20 +51,14 @@ jobs:
             CM-Comercial/tests/payment_core_test.php
             CM-Comercial/tests/payment_service_test.php
             CM-Comercial/tests/customer_financial_history_test.php
+            CM-Comercial/tests/csrf_test.php
             CM-Comercial/tests/integration_suite.php
           )
-          ran=0
           for test in "${tests[@]}"; do
-            if [ -f "$test" ]; then
-              echo "Running $test"
-              php "$test"
-              ran=1
-            fi
+            test -f "$test" || { echo "Missing test: $test"; exit 1; }
+            echo "Running $test"
+            php "$test"
           done
-          if [ "$ran" -eq 0 ]; then
-            echo 'No automated domain tests found.'
-            exit 1
-          fi
 
       - name: Security audit
         shell: bash
