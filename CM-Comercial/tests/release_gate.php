@@ -1,0 +1,32 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Release gate aggregator. It verifies that the expected validation assets
+ * exist; environment-dependent checks remain explicitly pending until run
+ * against a configured deployment.
+ */
+$required = [
+    __DIR__ . '/payment_core_test.php',
+    __DIR__ . '/payment_service_test.php',
+    __DIR__ . '/customer_financial_history_test.php',
+    __DIR__ . '/integration_suite.php',
+    __DIR__ . '/security_audit.php',
+    __DIR__ . '/e2e_flow_spec.php',
+];
+
+$missing = array_values(array_filter($required, static fn(string $path): bool => !is_file($path)));
+
+foreach ($required as $path) {
+    $label = basename($path);
+    echo (is_file($path) ? 'READY' : 'MISSING') . ": $label\n";
+}
+
+echo "ENVIRONMENT_GATES: pending (database, HTTPS, gateway sandbox, webhook, E2E browser)\n";
+
+if ($missing !== []) {
+    fwrite(STDERR, 'FAIL: missing validation assets: ' . implode(', ', array_map('basename', $missing)) . "\n");
+    exit(1);
+}
+
+echo "RELEASE_GATE_ASSETS_READY\n";
