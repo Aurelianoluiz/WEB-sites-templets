@@ -22,8 +22,15 @@ load_local_env();
 $APP_ENV = getenv('APP_ENV') ?: 'production';
 $APP_DEBUG = ($APP_ENV !== 'production');
 
+// Sessões: modo estrito + cookies protegidos + timeout de inatividade.
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+ini_set('session.gc_maxlifetime', (string)SESSION_TIMEOUT);
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
-    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    $secure = ($APP_ENV === 'production') || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
     session_set_cookie_params([
         'lifetime' => 0,
         'path' => '/',
@@ -32,6 +39,25 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
         'samesite' => 'Lax',
     ]);
     session_start();
+}
+
+// Expira sessões inativas e troca o identificador na primeira requisição autenticada.
+if (!isset($_SESSION['_last_activity'])) {
+    $_SESSION['_last_activity'] = time();
+} elseif ((time() - (int)$_SESSION['_last_activity']) > SESSION_TIMEOUT) {
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], '', (bool)$params['secure'], (bool)$params['httponly']);
+    }
+    session_destroy();
+    session_start();
+    $_SESSION['_last_activity'] = time();
+}
+$_SESSION['_last_activity'] = time();
+if (isset($_SESSION['user']) && empty($_SESSION['_auth_session_rotated'])) {
+    session_regenerate_id(true);
+    $_SESSION['_auth_session_rotated'] = time();
 }
 
 // Centraliza CSRF e evita definições duplicadas entre config e includes.
