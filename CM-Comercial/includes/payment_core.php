@@ -47,15 +47,25 @@ function valid_payment_transition(string $from, string $to): bool
 
 function upsert_payment(PDO $pdo, int $orderId, float $amount, string $method = 'pending'): int
 {
+    if ($orderId < 1) throw new InvalidArgumentException('Invalid order id.');
+    if ($amount <= 0) throw new InvalidArgumentException('Invalid payment amount.');
+
     $now = date('c');
-    $stmt = $pdo->prepare('SELECT id FROM payments WHERE order_id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, status, amount, method FROM payments WHERE order_id = ? LIMIT 1');
     $stmt->execute([$orderId]);
-    $existing = $stmt->fetchColumn();
+    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($existing !== false) {
-        $upd = $pdo->prepare('UPDATE payments SET amount = ?, method = ?, updated_at = ? WHERE id = ?');
-        $upd->execute([$amount, $method, $now, (int)$existing]);
-        return (int)$existing;
+        // A payment that has advanced beyond pending is financially immutable
+        // through this setup helper. Further changes must go through the
+        // explicit payment state machine/financial operations.
+        if ((string)$existing['status'] !== 'pending') {
+            return (int)$existing['id'];
+        }
+
+        $upd = $pdo->prepare('UPDATE payments SET amount = ?, method = ?, updated_at = ? WHERE id = ? AND status = \'pending\'');
+        $upd->execute([$amount, $method, $now, (int)$existing['id']]);
+        return (int)$existing['id'];
     }
 
     $ins = $pdo->prepare('INSERT INTO payments (order_id,status,method,amount,created_at,updated_at) VALUES (?,\'pending\',?,?,?,?)');
