@@ -82,21 +82,34 @@ final class MercadoPagoAdapter implements PaymentGatewayAdapter
         $data = json_decode($rawBody, true);
         if (!is_array($data)) throw new InvalidArgumentException('Webhook JSON inválido.');
 
-        $type = (string)($data['type'] ?? $data['action'] ?? 'unknown');
+        $type = (string)($data['type'] ?? '');
+        $action = (string)($data['action'] ?? '');
+        if ($type === '' && $action !== '') $type = $action;
         $dataId = (string)($data['data']['id'] ?? '');
         if ($dataId === '') throw new InvalidArgumentException('Webhook sem data.id.');
 
         $payment = $this->get('/payments/' . rawurlencode($dataId));
-        // Deterministic event identity: it must not depend on transport headers
-        // so the same provider event remains idempotent across retries.
-        $eventId = 'mp-' . $type . '-' . $dataId;
+        $status = $this->normalizeStatus((string)($payment['status'] ?? 'pending'));
+        $transactionId = (string)($payment['id'] ?? $dataId);
+
+        // Keep retries of the same notification idempotent while allowing
+        // legitimate lifecycle changes for the same payment to be distinct.
+        $eventFingerprint = implode('|', [
+            'mp',
+            $type,
+            $action,
+            $dataId,
+            $status,
+            $transactionId,
+        ]);
+        $eventId = hash('sha256', $eventFingerprint);
 
         return [
-            'event_id' => hash('sha256', $eventId),
+            'event_id' => $eventId,
             'type' => $type,
             'payment_id' => (string)($payment['external_reference'] ?? ''),
-            'status' => $this->normalizeStatus((string)($payment['status'] ?? 'pending')),
-            'transaction_id' => $dataId,
+            'status' => $status,
+            'transaction_id' => $transactionId,
             'raw' => $payment,
         ];
     }
