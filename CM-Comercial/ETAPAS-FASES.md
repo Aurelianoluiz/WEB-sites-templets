@@ -5,7 +5,7 @@ Tecnologias: HTML5, CSS3, JavaScript e PHP
 Identidade: vermelho, amarelo, preto e branco; logo fornecido pelo cliente.
 Referência visual: Home Center / e-commerce de materiais de construção, inspirado na estrutura de grandes home centers, sem copiar identidade proprietária.
 
-## Fases concluídas
+## Fases concluídas — desenvolvimento estrutural
 
 | Fase | Etapa | Status |
 |---:|---|:---:|
@@ -27,136 +27,87 @@ Referência visual: Home Center / e-commerce de materiais de construção, inspi
 | 16 | Integrações + preparação de deploy | CONCLUÍDA |
 | 17 | Homologação técnica final | CONCLUÍDA |
 
-## Fase 1 — Fundação
-- PHP, HTML5, CSS3 e JavaScript.
-- Estrutura inicial de banco via PDO/SQLite.
-- Sessões e autenticação.
-- Separação de cliente e administrador.
+## Fases 18–34 — endurecimento, validação e release
 
-## Fase 2 — Catálogo e produtos
-- Produtos, categorias, busca, detalhes, preços e estoque.
-- CRUD administrativo.
-- Destaques e ofertas.
+| Fase | Etapa | Status atual |
+|---:|---|:---:|
+| 18 | Baseline de release e inventário técnico | CONCLUÍDA |
+| 19 | Revisão de autenticação, sessão e autorização | CONCLUÍDA |
+| 20 | Revisão de CSRF e proteção de operações de estado | CONCLUÍDA |
+| 21 | Checkout conectado ao serviço de pagamento | CONCLUÍDA |
+| 22 | Adapter Mercado Pago / sandbox-produção | CONCLUÍDA |
+| 23 | Webhook autenticado por HMAC-SHA256 | CONCLUÍDA |
+| 24 | Operações de autorização/captura/estorno | CONCLUÍDA |
+| 25 | Conciliação financeira e divergências | CONCLUÍDA |
+| 26 | Política de reserva/liberação de estoque | CONCLUÍDA |
+| 27 | Histórico financeiro do cliente | CONCLUÍDA |
+| 28 | UX, acessibilidade e formatação de campos | CONCLUÍDA |
+| 29 | Testes automatizados de integração | CONCLUÍDA |
+| 30 | Auditoria e endurecimento de segurança | CONCLUÍDA |
+| 31 | Hardening e preparação de deploy | CONCLUÍDA |
+| 32 | SEO + observabilidade + logs | CONCLUÍDA |
+| 33 | E2E smoke e especificação de fluxo | IMPLEMENTAÇÃO CONCLUÍDA / EXECUÇÃO EXTERNA PENDENTE |
+| 34 | Release Gate / homologação final | ESTRUTURA CONCLUÍDA / HOMOLOGAÇÃO EXTERNA PENDENTE |
 
-## Fase 3 — Carrinho, checkout e pedidos
-- Carrinho persistente.
-- Checkout.
-- Criação de pedidos.
-- Itens, subtotal e total.
-- Baixa de estoque.
+## Correções e validações adicionadas após a Fase 17
 
-## Fase 4 — Área do cliente
-- Cadastro/login/logout.
-- Minha conta.
-- Endereços.
-- Histórico e detalhes de pedidos.
+### Segurança e autenticação
+- Helper centralizado de CSRF em `includes/csrf.php`.
+- Compatibilidade de `verify_csrf()` com módulos administrativos existentes.
+- Proteção reforçada de sessão em `config.php`.
+- Logout por POST com CSRF e destruição completa da sessão.
+- Testes de sessão, autenticação, autorização, logout, CSRF e isolamento do cliente.
+- Identidade financeira vinculada exclusivamente a `$_SESSION['user']['id']`.
+- Auditoria de armazenamento/verificação segura de senhas.
 
-## Fase 5 — Gestão de pedidos
-- Dashboard administrativo.
-- Consulta e filtros.
-- Status de pedido.
-- Gestão operacional.
+### Pagamentos
+- Payload bruto do gateway não é devolvido diretamente pelo checkout.
+- Webhook validado por assinatura HMAC.
+- Valor do gateway comparado ao valor interno antes da mudança de estado.
+- Idempotência de eventos de pagamento por `event_id`.
+- Máquina de estados para pagamentos e pedidos.
+- Testes de consistência de pagamento, operações, política de pedido e estorno.
 
-## Fase 6 — Usuários e permissões
-- Papéis customer/admin.
-- Proteção das rotas administrativas.
-- Ativação/bloqueio de usuários.
-- Administração de acessos.
+### Estoque
+- Política: `paid → commit_reservation`.
+- Política: `failed/cancelled → release_reservation`.
+- `refunded → review_refund_stock`, sem baixa automática.
+- Ledger `stock_payment_operations` para impedir duplicação de efeitos.
+- Bridge de pagamento para a camada específica de estoque, com mutação real injetada para evitar assumir um schema inexistente.
 
-## Fase 7 — Estoque e auditoria
-- Saldo.
-- Entradas/saídas.
-- Baixo estoque.
-- Histórico de movimentações.
+### Release / testes
+- `validation_runner.php` para testes determinísticos.
+- `release_consistency.php` para manter runner e gate sincronizados.
+- `release_gate.php` para inventário obrigatório.
+- Testes específicos de pagamento, segurança, identidade, estoque e estorno.
+- CI preparada para PHP 8.2, 8.3 e 8.4.
 
-## Fase 8 — Banners/campanhas/ofertas
-- CRUD de banners.
-- Ordem e ativação.
-- CTA.
-- Campanhas integradas à Home.
+## Fases ainda abertas / dependências externas
 
-## Fase 9 — Frete e entrega
-- Retirada e entrega.
-- CEP/endereço.
-- Regras por CEP/UF.
-- Frete grátis por valor.
-- Prazo e modalidade gravados no pedido.
+### 33 — E2E
+A especificação está versionada, porém a execução final depende de servidor acessível, banco configurado, sessão real, checkout e gateway em sandbox.
 
-## Fase 10 — Pagamentos
-- PIX e cartão como opções arquiteturais.
-- Status financeiro separado do status do pedido.
-- Não armazenar número de cartão/CVV.
-- Estrutura para gateway externo.
+### 34 — Homologação / Release
+A estrutura técnica está pronta, mas a homologação externa ainda precisa comprovar:
 
-## Fase 11 — Segurança
-- Sessões/cookies seguros.
-- CSRF.
-- Headers de segurança.
-- Proteção de uploads.
-- Proteção de arquivos sensíveis.
-- Ambiente de produção.
-- `.env.example`.
+1. Banco de dados/driver de produção.
+2. HTTPS real.
+3. Mercado Pago Sandbox configurado.
+4. Webhook HTTPS funcional.
+5. Captura e estorno em sandbox.
+6. Execução E2E em servidor.
+7. Logs e retenção configurados.
+8. Backup externo do banco.
 
-## Fase 12 — SEO, desempenho e acessibilidade
-- Meta tags.
-- Canonical/Open Graph.
-- Sitemap/robots.
-- Dados estruturados.
-- Lazy loading/defer.
-- Navegação por teclado.
-- ARIA/foco/contraste.
-- Responsividade.
+### 35 — Backup final + pacote ZIP
+Pendente de solicitação/execução final. Quando realizado, deve registrar no próprio repositório a data, hora, commit de referência e integridade do pacote.
 
-## Fase 13 — Homologação técnica
-- Lint PHP.
-- Validação JS.
-- Revisão de rotas.
-- Revisão de segurança.
-- Checklist de testes.
+## Estado consolidado
 
-## Fase 14 — Auditoria final
-- `.htaccess`.
-- Arquivos sensíveis.
-- Páginas 403/404/500.
-- Deploy checklist.
-- Configuração de produção.
+- Desenvolvimento técnico estrutural: 17/17 fases concluídas.
+- Fases 18–32: implementação e validação técnica concluídas.
+- Fase 33: código/spec concluídos; execução E2E final depende de ambiente.
+- Fase 34: release gate e documentação consolidados; homologação externa pendente.
+- Fase 35: backup final e ZIP ainda não realizados nesta rodada.
 
-## Fase 15 — UX/UI
-- Header e busca.
-- Menu/sidebar.
-- Hero.
-- Vitrines.
-- Cards.
-- Carrinho.
-- Mobile.
-- Acessibilidade e microinterações.
-
-## Fase 16 — Integrações + deploy
-- Adaptador de pagamento.
-- Preparação para frete externo.
-- Preparação para e-mail.
-- Configuração segura de credenciais.
-- Documentação de deploy.
-
-## Fase 17 — Homologação final
-- Revisão técnica final.
-- Validação de estrutura.
-- Pacote final.
-- Preparação para ambiente real.
-
-## Pendências externas para produção real
-Estas não são fases de desenvolvimento do código, mas dependem de serviços/credenciais externos:
-
-1. Hospedagem PHP compatível.
-2. Domínio e DNS.
-3. HTTPS/SSL.
-4. Gateway de pagamento real e credenciais.
-5. API de frete/CEP, se desejada.
-6. SMTP/e-mail transacional, se desejado.
-7. Banco/driver de produção habilitado.
-8. Teste de compra em ambiente real/sandbox.
-9. Configuração de backup.
-
-## Estado
-Desenvolvimento técnico: 17/17 fases concluídas.
-Deploy real: depende das credenciais e infraestrutura de produção.
+**Regra de backup:** nenhum novo backup deve ser criado automaticamente; somente quando explicitamente solicitado.
