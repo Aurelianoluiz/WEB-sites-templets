@@ -14,6 +14,7 @@ $required = [
     __DIR__ . '/refund_stock_policy_test.php',
     __DIR__ . '/payment_immutability_test.php',
     __DIR__ . '/payment_event_ownership_test.php',
+    __DIR__ . '/payment_event_duplicate_test.php',
     __DIR__ . '/webhook_amount_validation_test.php',
     __DIR__ . '/webhook_event_id_test.php',
     __DIR__ . '/webhook_lifecycle_event_test.php',
