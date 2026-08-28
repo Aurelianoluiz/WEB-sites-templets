@@ -2,16 +2,23 @@
 declare(strict_types=1);
 
 /**
- * Release gate aggregator. It verifies that the expected validation assets
- * exist; environment-dependent checks remain explicitly pending until run
- * against a configured deployment.
+ * Release gate aggregator. It verifies that the full validation asset set
+ * exists; environment-dependent checks remain pending until run against
+ * a configured deployment.
  */
 $required = [
     __DIR__ . '/payment_core_test.php',
     __DIR__ . '/payment_service_test.php',
     __DIR__ . '/customer_financial_history_test.php',
-    __DIR__ . '/integration_suite.php',
+    __DIR__ . '/customer_identity_binding_test.php',
+    __DIR__ . '/csrf_test.php',
+    __DIR__ . '/authentication_security_test.php',
+    __DIR__ . '/access_control_test.php',
+    __DIR__ . '/logout_security_test.php',
+    __DIR__ . '/password_auth_audit.php',
+    __DIR__ . '/auth_surface_audit.php',
     __DIR__ . '/security_audit.php',
+    __DIR__ . '/integration_suite.php',
     __DIR__ . '/e2e_flow_spec.php',
 ];
 
