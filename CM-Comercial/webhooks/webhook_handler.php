@@ -81,10 +81,19 @@ function process_gateway_webhook(string $rawBody, array $headers): void
 
     $pdo = db();
     ensure_payment_schema($pdo);
-    $stmt = $pdo->prepare('SELECT id FROM payments WHERE order_id=? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, amount FROM payments WHERE order_id=? LIMIT 1');
     $stmt->execute([$orderId]);
-    $paymentId = (int)($stmt->fetchColumn() ?: 0);
+    $paymentRow = $stmt->fetch();
+    $paymentId = (int)($paymentRow['id'] ?? 0);
     if ($paymentId < 1) throw new RuntimeException('Pagamento interno não encontrado.');
+
+    // Never change the internal payment state from a signed webhook whose
+    // provider amount does not match the amount created internally.
+    $gatewayAmount = isset($event['raw']['transaction_amount']) ? (float)$event['raw']['transaction_amount'] : null;
+    $internalAmount = round((float)($paymentRow['amount'] ?? 0), 2);
+    if ($gatewayAmount === null || round($gatewayAmount, 2) !== $internalAmount) {
+        throw new RuntimeException('Valor do pagamento divergente da cobrança interna.');
+    }
 
     apply_gateway_event($pdo, $paymentId, (string)$event['event_id'], (string)$event['type'], (string)$event['status'], $event['transaction_id'] ?? null, (array)($event['raw'] ?? []));
 
