@@ -27,9 +27,10 @@ function create_checkout_payment(PDO $pdo, int $orderId, float $amount, string $
 
 /**
  * Applies a normalized provider event exactly once.
- * The adapter is responsible for authenticating the provider webhook.
- * A duplicate event is only considered already processed when it belongs to
- * the same payment record; cross-payment event-id reuse is rejected.
+ * Returns true only when this call inserted and applied a new event.
+ * An exact duplicate for the same payment returns false so callers can avoid
+ * repeating downstream side effects (for example order-state updates).
+ * A duplicate event id belonging to another payment is rejected.
  */
 function apply_gateway_event(PDO $pdo, int $paymentId, string $eventId, string $eventType, string $status, ?string $transactionId = null, array $payload = []): bool
 {
@@ -49,7 +50,7 @@ function apply_gateway_event(PDO $pdo, int $paymentId, string $eventId, string $
                 throw new RuntimeException('Payment event id already belongs to another payment.');
             }
             $pdo->commit();
-            return true; // exact duplicate webhook: already processed
+            return false; // exact duplicate webhook; downstream work must not repeat
         }
 
         if (!transition_payment($pdo, $paymentId, $status, $transactionId)) {
