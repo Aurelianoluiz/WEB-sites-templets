@@ -10,10 +10,15 @@ ensure_payment_schema($pdo);
 $paymentA = upsert_payment($pdo, 101, 50.00, 'pix');
 $paymentB = upsert_payment($pdo, 102, 75.00, 'pix');
 
-if (apply_gateway_event($pdo, $paymentA, 'evt-owner-1', 'payment.created', 'paid', 'tx-a')) {
-    // expected success
-} else {
+if (!apply_gateway_event($pdo, $paymentA, 'evt-owner-1', 'payment.created', 'paid', 'tx-a')) {
     fwrite(STDERR, "FAIL: first gateway event was not accepted\n");
+    exit(1);
+}
+
+// Exact duplicate for the same payment must be idempotent and return false,
+// allowing the webhook handler to skip all downstream side effects.
+if (apply_gateway_event($pdo, $paymentA, 'evt-owner-1', 'payment.created', 'paid', 'tx-a')) {
+    fwrite(STDERR, "FAIL: exact duplicate event was reported as new\n");
     exit(1);
 }
 
