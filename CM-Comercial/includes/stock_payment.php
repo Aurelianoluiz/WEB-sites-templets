@@ -20,9 +20,15 @@ function ensure_stock_operation_schema(PDO $pdo): void
     )");
 }
 
+/**
+ * Atomically claims a stock side effect for a payment status.
+ * A true return means this caller owns the first claim and may perform the
+ * real stock mutation. A false return means the operation was already claimed.
+ */
 function register_stock_payment_operation(PDO $pdo, int $orderId, string $paymentStatus): bool
 {
     $action = stock_action_for_payment($paymentStatus);
+    if ($orderId < 1) throw new InvalidArgumentException('Invalid order id.');
     if ($action === 'keep_reservation' || $action === 'review_refund_stock') {
         return false;
     }
@@ -36,6 +42,10 @@ function register_stock_payment_operation(PDO $pdo, int $orderId, string $paymen
     return $stmt->rowCount() === 1;
 }
 
+/**
+ * Marks a previously claimed operation as applied. This is intentionally
+ * conditional so repeated callbacks cannot mark an already-applied effect.
+ */
 function mark_stock_payment_operation_applied(PDO $pdo, int $orderId, string $action): bool
 {
     ensure_stock_operation_schema($pdo);
@@ -45,4 +55,16 @@ function mark_stock_payment_operation_applied(PDO $pdo, int $orderId, string $ac
     );
     $stmt->execute([date('c'), $key]);
     return $stmt->rowCount() === 1;
+}
+
+/**
+ * Returns whether the operation was already claimed/applied.
+ */
+function stock_payment_operation_claimed(PDO $pdo, int $orderId, string $action): bool
+{
+    ensure_stock_operation_schema($pdo);
+    $key = stock_operation_key($orderId, $action);
+    $stmt = $pdo->prepare('SELECT 1 FROM stock_payment_operations WHERE operation_key=? LIMIT 1');
+    $stmt->execute([$key]);
+    return $stmt->fetchColumn() !== false;
 }
