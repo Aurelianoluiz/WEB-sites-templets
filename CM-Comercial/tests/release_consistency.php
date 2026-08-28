@@ -22,6 +22,7 @@ $expected = [
     'auth_surface_audit.php',
     'security_audit.php',
     'integration_suite.php',
+    'payment_consistency_test.php',
     'stock_payment_idempotency_test.php',
     'stock_payment_bridge_test.php',
 ];
