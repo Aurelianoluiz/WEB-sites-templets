@@ -43,30 +43,17 @@ jobs:
           fi
           for file in "${files[@]}"; do php -l "$file"; done
 
-      - name: Run isolated domain and access-control tests
+      - name: Run deterministic validation runner
         shell: bash
         run: |
           set -euo pipefail
-          tests=(
-            CM-Comercial/tests/payment_core_test.php
-            CM-Comercial/tests/payment_service_test.php
-            CM-Comercial/tests/customer_financial_history_test.php
-            CM-Comercial/tests/csrf_test.php
-            CM-Comercial/tests/access_control_test.php
-            CM-Comercial/tests/integration_suite.php
-          )
-          for test in "${tests[@]}"; do
-            test -f "$test" || { echo "Missing test: $test"; exit 1; }
-            echo "Running $test"
-            php "$test"
-          done
+          php CM-Comercial/tests/validation_runner.php
 
-      - name: Security audit
+      - name: Verify release consistency
         shell: bash
         run: |
           set -euo pipefail
-          test -f CM-Comercial/tests/security_audit.php
-          php CM-Comercial/tests/security_audit.php
+          php CM-Comercial/tests/release_consistency.php
 
       - name: Release gate assets
         shell: bash
