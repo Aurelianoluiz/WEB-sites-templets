@@ -56,9 +56,6 @@ function upsert_payment(PDO $pdo, int $orderId, float $amount, string $method = 
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($existing !== false) {
-        // A payment that has advanced beyond pending is financially immutable
-        // through this setup helper. Further changes must go through the
-        // explicit payment state machine/financial operations.
         if ((string)$existing['status'] !== 'pending') {
             return (int)$existing['id'];
         }
@@ -82,16 +79,22 @@ function record_payment_event(PDO $pdo, int $paymentId, string $eventId, string 
 
 function transition_payment(PDO $pdo, int $paymentId, string $newStatus, ?string $transactionId = null): bool
 {
-    $stmt = $pdo->prepare('SELECT status FROM payments WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT status, transaction_id FROM payments WHERE id = ?');
     $stmt->execute([$paymentId]);
-    $current = $stmt->fetchColumn();
-    if ($current === false || !valid_payment_transition((string)$current, $newStatus)) return false;
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row === false || !valid_payment_transition((string)$row['status'], $newStatus)) return false;
+
+    $currentTransactionId = trim((string)($row['transaction_id'] ?? ''));
+    $incomingTransactionId = $transactionId === null ? '' : trim($transactionId);
+    if ($currentTransactionId !== '' && $incomingTransactionId !== '' && $currentTransactionId !== $incomingTransactionId) {
+        return false;
+    }
 
     $sql = 'UPDATE payments SET status = ?, updated_at = ?';
     $params = [$newStatus, date('c')];
-    if ($transactionId !== null) {
-        $sql .= ', transaction_id = ?';
-        $params[] = $transactionId;
+    if ($incomingTransactionId !== '') {
+        $sql .= ' , transaction_id = ?';
+        $params[] = $incomingTransactionId;
     }
     $sql .= ' WHERE id = ?';
     $params[] = $paymentId;
