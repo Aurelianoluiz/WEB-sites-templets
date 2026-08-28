@@ -87,7 +87,9 @@ final class MercadoPagoAdapter implements PaymentGatewayAdapter
         if ($dataId === '') throw new InvalidArgumentException('Webhook sem data.id.');
 
         $payment = $this->get('/payments/' . rawurlencode($dataId));
-        $eventId = 'mp-' . $type . '-' . $dataId . '-' . ($headers['x-request-id'] ?? ($data['date_created'] ?? ''));
+        // Deterministic event identity: it must not depend on transport headers
+        // so the same provider event remains idempotent across retries.
+        $eventId = 'mp-' . $type . '-' . $dataId;
 
         return [
             'event_id' => hash('sha256', $eventId),
