@@ -19,6 +19,7 @@ $expected = [
     'payment_event_ownership_test.php',
     'webhook_amount_validation_test.php',
     'webhook_event_id_test.php',
+    'payment_transaction_identity_test.php',
     'customer_financial_history_test.php',
     'customer_identity_binding_test.php',
     'csrf_test.php',
