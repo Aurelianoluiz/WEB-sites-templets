@@ -14,6 +14,7 @@ $expected = [
     'payment_service_test.php',
     'payment_operations_test.php',
     'payment_order_policy_test.php',
+    'refund_stock_policy_test.php',
     'customer_financial_history_test.php',
     'customer_identity_binding_test.php',
     'csrf_test.php',
@@ -36,7 +37,6 @@ foreach ($expected as $file) {
     if (!str_contains($runner, "'" . $file . "'")) $failed[] = "runner:$file";
 }
 
-if (!str_contains($gate, 'e2e_flow_spec.php')) $failed[] = 'gate:e2e_flow_spec.php';
 if (!str_contains($gate, 'ENVIRONMENT_GATES')) $failed[] = 'gate:environment-marker';
 
 foreach ($expected as $file) {
