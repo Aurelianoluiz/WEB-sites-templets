@@ -19,6 +19,7 @@ $required = [
     __DIR__ . '/auth_surface_audit.php',
     __DIR__ . '/security_audit.php',
     __DIR__ . '/integration_suite.php',
+    __DIR__ . '/payment_consistency_test.php',
     __DIR__ . '/stock_payment_idempotency_test.php',
     __DIR__ . '/stock_payment_bridge_test.php',
 ];
