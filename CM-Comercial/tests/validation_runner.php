@@ -8,6 +8,7 @@ declare(strict_types=1);
 $tests = [
     'payment_core_test.php',
     'payment_service_test.php',
+    'payment_operations_test.php',
     'customer_financial_history_test.php',
     'customer_identity_binding_test.php',
     'csrf_test.php',
