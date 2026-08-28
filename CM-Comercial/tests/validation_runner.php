@@ -10,6 +10,7 @@ $tests = [
     'payment_service_test.php',
     'payment_operations_test.php',
     'payment_order_policy_test.php',
+    'refund_stock_policy_test.php',
     'customer_financial_history_test.php',
     'customer_identity_binding_test.php',
     'csrf_test.php',
