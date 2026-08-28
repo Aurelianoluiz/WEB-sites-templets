@@ -1,0 +1,44 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Verifies that the release gate and deterministic runner reference the same
+ * required test inventory, without needing a live database or external APIs.
+ */
+$root = __DIR__;
+$gate = (string)file_get_contents($root . '/release_gate.php');
+$runner = (string)file_get_contents($root . '/validation_runner.php');
+
+$expected = [
+    'payment_core_test.php',
+    'payment_service_test.php',
+    'customer_financial_history_test.php',
+    'customer_identity_binding_test.php',
+    'csrf_test.php',
+    'authentication_security_test.php',
+    'access_control_test.php',
+    'logout_security_test.php',
+    'password_auth_audit.php',
+    'auth_surface_audit.php',
+    'security_audit.php',
+    'integration_suite.php',
+];
+
+$failed = [];
+foreach ($expected as $file) {
+    if (!is_file($root . '/' . $file)) $failed[] = "missing:$file";
+    if (!str_contains($gate, "'" . $file . "'")) $failed[] = "gate:$file";
+    if (!str_contains($runner, "'" . $file . "'")) $failed[] = "runner:$file";
+}
+
+if (!str_contains($gate, 'e2e_flow_spec.php')) $failed[] = 'gate:e2e_flow_spec.php';
+if (!str_contains($gate, 'ENVIRONMENT_GATES')) $failed[] = 'gate:environment-marker';
+
+foreach ($expected as $file) echo (($failed === [] || (is_file($root . '/' . $file) && str_contains($gate, "'" . $file . "'") && str_contains($runner, "'" . $file . "'"))) ? 'READY' : 'CHECK') . ": $file\n";
+
+if ($failed !== []) {
+    fwrite(STDERR, 'FAIL: ' . implode(', ', $failed) . "\n");
+    exit(1);
+}
+
+echo "PASS: release consistency\n";
