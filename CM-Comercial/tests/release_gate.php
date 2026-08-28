@@ -19,7 +19,8 @@ $required = [
     __DIR__ . '/auth_surface_audit.php',
     __DIR__ . '/security_audit.php',
     __DIR__ . '/integration_suite.php',
-    __DIR__ . '/e2e_flow_spec.php',
+    __DIR__ . '/stock_payment_idempotency_test.php',
+    __DIR__ . '/stock_payment_bridge_test.php',
 ];
 
 $missing = array_values(array_filter($required, static fn(string $path): bool => !is_file($path)));
