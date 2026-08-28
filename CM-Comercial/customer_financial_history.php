@@ -11,7 +11,10 @@ function authenticated_customer_financial_history(PDO $pdo, int $limit = 50, int
 {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
-    $customerId = filter_var($_SESSION['customer_id'] ?? null, FILTER_VALIDATE_INT);
+    // The application authentication model stores the signed-in user in
+    // $_SESSION['user']. Keep customer identity bound to that server-side
+    // session and never trust a request-provided customer_id.
+    $customerId = filter_var($_SESSION['user']['id'] ?? null, FILTER_VALIDATE_INT);
     if (!$customerId || $customerId < 1) {
         http_response_code(401);
         throw new RuntimeException('Authentication required.');
