@@ -16,6 +16,7 @@ $required = [
     __DIR__ . '/payment_event_ownership_test.php',
     __DIR__ . '/webhook_amount_validation_test.php',
     __DIR__ . '/webhook_event_id_test.php',
+    __DIR__ . '/webhook_lifecycle_event_test.php',
     __DIR__ . '/payment_transaction_identity_test.php',
     __DIR__ . '/customer_financial_history_test.php',
     __DIR__ . '/customer_identity_binding_test.php',
