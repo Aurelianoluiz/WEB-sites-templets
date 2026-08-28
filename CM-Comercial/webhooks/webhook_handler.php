@@ -95,7 +95,19 @@ function process_gateway_webhook(string $rawBody, array $headers): void
         throw new RuntimeException('Valor do pagamento divergente da cobrança interna.');
     }
 
-    apply_gateway_event($pdo, $paymentId, (string)$event['event_id'], (string)$event['type'], (string)$event['status'], $event['transaction_id'] ?? null, (array)($event['raw'] ?? []));
+    $isNewEvent = apply_gateway_event(
+        $pdo,
+        $paymentId,
+        (string)$event['event_id'],
+        (string)$event['type'],
+        (string)$event['status'],
+        $event['transaction_id'] ?? null,
+        (array)($event['raw'] ?? [])
+    );
+
+    // Exact webhook retries are acknowledged but must not repeat downstream
+    // order-state updates or any future downstream side effects.
+    if (!$isNewEvent) return;
 
     $statusStmt = $pdo->prepare('SELECT status FROM payments WHERE id=?');
     $statusStmt->execute([$paymentId]);
