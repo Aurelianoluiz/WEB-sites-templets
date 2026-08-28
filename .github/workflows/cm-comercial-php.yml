@@ -43,7 +43,7 @@ jobs:
           fi
           for file in "${files[@]}"; do php -l "$file"; done
 
-      - name: Run isolated domain tests
+      - name: Run isolated domain and access-control tests
         shell: bash
         run: |
           set -euo pipefail
@@ -52,6 +52,7 @@ jobs:
             CM-Comercial/tests/payment_service_test.php
             CM-Comercial/tests/customer_financial_history_test.php
             CM-Comercial/tests/csrf_test.php
+            CM-Comercial/tests/access_control_test.php
             CM-Comercial/tests/integration_suite.php
           )
           for test in "${tests[@]}"; do
