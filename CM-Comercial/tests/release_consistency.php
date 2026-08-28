@@ -22,6 +22,8 @@ $expected = [
     'auth_surface_audit.php',
     'security_audit.php',
     'integration_suite.php',
+    'stock_payment_idempotency_test.php',
+    'stock_payment_bridge_test.php',
 ];
 
 $failed = [];
@@ -34,7 +36,12 @@ foreach ($expected as $file) {
 if (!str_contains($gate, 'e2e_flow_spec.php')) $failed[] = 'gate:e2e_flow_spec.php';
 if (!str_contains($gate, 'ENVIRONMENT_GATES')) $failed[] = 'gate:environment-marker';
 
-foreach ($expected as $file) echo (($failed === [] || (is_file($root . '/' . $file) && str_contains($gate, "'" . $file . "'") && str_contains($runner, "'" . $file . "'"))) ? 'READY' : 'CHECK') . ": $file\n";
+foreach ($expected as $file) {
+    $ready = is_file($root . '/' . $file)
+        && str_contains($gate, "'" . $file . "'")
+        && str_contains($runner, "'" . $file . "'");
+    echo ($ready ? 'READY' : 'CHECK') . ": $file\n";
+}
 
 if ($failed !== []) {
     fwrite(STDERR, 'FAIL: ' . implode(', ', $failed) . "\n");
