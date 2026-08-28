@@ -13,6 +13,7 @@ $tests = [
     'refund_stock_policy_test.php',
     'payment_immutability_test.php',
     'payment_event_ownership_test.php',
+    'payment_event_duplicate_test.php',
     'webhook_amount_validation_test.php',
     'webhook_event_id_test.php',
     'webhook_lifecycle_event_test.php',
