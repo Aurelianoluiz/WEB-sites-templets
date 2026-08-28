@@ -81,6 +81,7 @@ Referência visual: Home Center / e-commerce de materiais de construção, inspi
 - `release_gate.php` para inventário obrigatório.
 - Testes específicos de pagamento, segurança, identidade, estoque e estorno.
 - CI preparada para PHP 8.2, 8.3 e 8.4.
+- Auditoria de prontidão de produção.
 
 ## Fases ainda abertas / dependências externas
 
@@ -100,7 +101,10 @@ A estrutura técnica está pronta, mas a homologação externa ainda precisa com
 8. Backup externo do banco.
 
 ### 35 — Backup final + pacote ZIP
-Pendente de solicitação/execução final. Quando realizado, deve registrar no próprio repositório a data, hora, commit de referência e integridade do pacote.
+- Ponto de backup versionado criado em `BACKUP/BACKUP-2026-08-28_15-24-00-0300.md`.
+- Snapshot de restauração aponta para o commit `c158f23ad9fe77d33ba5990e9dd5915da6abd425`.
+- ZIP físico ainda não foi gerado neste ambiente.
+- Segredos/credenciais fora do Git continuam precisando de backup separado.
 
 ## Estado consolidado
 
@@ -108,6 +112,6 @@ Pendente de solicitação/execução final. Quando realizado, deve registrar no 
 - Fases 18–32: implementação e validação técnica concluídas.
 - Fase 33: código/spec concluídos; execução E2E final depende de ambiente.
 - Fase 34: release gate e documentação consolidados; homologação externa pendente.
-- Fase 35: backup final e ZIP ainda não realizados nesta rodada.
+- Fase 35: ponto de backup versionado criado; ZIP físico pendente por limitação de exportação binária deste ambiente.
 
 **Regra de backup:** nenhum novo backup deve ser criado automaticamente; somente quando explicitamente solicitado.
