@@ -9,6 +9,7 @@ declare(strict_types=1);
 $required = [
     __DIR__ . '/payment_core_test.php',
     __DIR__ . '/payment_service_test.php',
+    __DIR__ . '/payment_operations_test.php',
     __DIR__ . '/customer_financial_history_test.php',
     __DIR__ . '/customer_identity_binding_test.php',
     __DIR__ . '/csrf_test.php',
