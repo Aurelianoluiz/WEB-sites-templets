@@ -19,6 +19,26 @@ function refund_payment(PDO $pdo, int $paymentId, string $transactionId = ''): b
     if ($paymentId < 1) throw new InvalidArgumentException('Invalid payment id.');
     if ($transactionId === '') throw new InvalidArgumentException('Refund transaction id is required.');
 
-    if (!transition_payment($pdo, $paymentId, 'refunded', null)) return false;
-    return record_refund_transaction($pdo, $paymentId, $transactionId);
+    $startedTransaction = false;
+    if (!$pdo->inTransaction()) {
+        $pdo->beginTransaction();
+        $startedTransaction = true;
+    }
+
+    try {
+        if (!transition_payment($pdo, $paymentId, 'refunded', null)) {
+            if ($startedTransaction) $pdo->commit();
+            return false;
+        }
+
+        if (!record_refund_transaction($pdo, $paymentId, $transactionId)) {
+            throw new RuntimeException('Unable to record refund transaction.');
+        }
+
+        if ($startedTransaction) $pdo->commit();
+        return true;
+    } catch (Throwable $e) {
+        if ($startedTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
 }
