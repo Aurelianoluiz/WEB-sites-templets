@@ -31,9 +31,20 @@ function create_checkout_payment(PDO $pdo, int $orderId, float $amount, string $
  * An exact duplicate for the same payment returns false so callers can avoid
  * repeating downstream side effects (for example order-state updates).
  * A duplicate event id belonging to another payment is rejected.
+ *
+ * The optional callback runs before the transaction commits, allowing
+ * payment and downstream order mutations to become one atomic operation.
  */
-function apply_gateway_event(PDO $pdo, int $paymentId, string $eventId, string $eventType, string $status, ?string $transactionId = null, array $payload = []): bool
-{
+function apply_gateway_event(
+    PDO $pdo,
+    int $paymentId,
+    string $eventId,
+    string $eventType,
+    string $status,
+    ?string $transactionId = null,
+    array $payload = [],
+    ?callable $afterTransition = null
+): bool {
     if ($paymentId < 1 || $eventId === '' || strlen($eventId) > 255) {
         throw new InvalidArgumentException('Invalid payment event.');
     }
@@ -50,11 +61,15 @@ function apply_gateway_event(PDO $pdo, int $paymentId, string $eventId, string $
                 throw new RuntimeException('Payment event id already belongs to another payment.');
             }
             $pdo->commit();
-            return false; // exact duplicate webhook; downstream work must not repeat
+            return false;
         }
 
         if (!transition_payment($pdo, $paymentId, $status, $transactionId)) {
             throw new RuntimeException('Invalid payment transition.');
+        }
+
+        if ($afterTransition !== null) {
+            $afterTransition($pdo, $paymentId, $status, $transactionId);
         }
 
         $pdo->commit();
