@@ -20,7 +20,7 @@ if (count($pending) !== 1 || (int)$pending[0]['order_id'] !== 900) {
 
 if (!mark_stock_payment_operation_reviewed($pdo, 900, 'commit_reservation')) {
     fwrite(STDERR, "FAIL: unresolved operation was not reviewable\n");
-    exit(1;
+    exit(1);
 }
 
 if (list_unresolved_stock_payment_operations($pdo) !== []) {
