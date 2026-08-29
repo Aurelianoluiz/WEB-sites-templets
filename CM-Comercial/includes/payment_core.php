@@ -14,6 +14,7 @@ function ensure_payment_schema(PDO $pdo): void
         status TEXT NOT NULL DEFAULT 'pending',
         method TEXT,
         transaction_id TEXT,
+        refund_transaction_id TEXT,
         amount REAL NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -29,6 +30,14 @@ function ensure_payment_schema(PDO $pdo): void
         created_at TEXT NOT NULL,
         UNIQUE(event_id)
     )");
+
+    $columns = [];
+    foreach ($pdo->query("PRAGMA table_info(payments)") as $column) {
+        $columns[(string)$column['name']] = true;
+    }
+    if (!isset($columns['refund_transaction_id'])) {
+        $pdo->exec('ALTER TABLE payments ADD COLUMN refund_transaction_id TEXT');
+    }
 }
 
 function valid_payment_transition(string $from, string $to): bool
@@ -48,17 +57,16 @@ function valid_payment_transition(string $from, string $to): bool
 function upsert_payment(PDO $pdo, int $orderId, float $amount, string $method = 'pending'): int
 {
     if ($orderId < 1) throw new InvalidArgumentException('Invalid order id.');
-    if ($amount <= 0) throw new InvalidArgumentException('Invalid payment amount.');
+    if (!is_finite($amount) || $amount <= 0) throw new InvalidArgumentException('Invalid payment amount.');
 
+    ensure_payment_schema($pdo);
     $now = date('c');
     $stmt = $pdo->prepare('SELECT id, status, amount, method FROM payments WHERE order_id = ? LIMIT 1');
     $stmt->execute([$orderId]);
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($existing !== false) {
-        if ((string)$existing['status'] !== 'pending') {
-            return (int)$existing['id'];
-        }
+        if ((string)$existing['status'] !== 'pending') return (int)$existing['id'];
 
         $upd = $pdo->prepare('UPDATE payments SET amount = ?, method = ?, updated_at = ? WHERE id = ? AND status = \'pending\'');
         $upd->execute([$amount, $method, $now, (int)$existing['id']]);
@@ -86,9 +94,7 @@ function transition_payment(PDO $pdo, int $paymentId, string $newStatus, ?string
 
     $currentTransactionId = trim((string)($row['transaction_id'] ?? ''));
     $incomingTransactionId = $transactionId === null ? '' : trim($transactionId);
-    if ($currentTransactionId !== '' && $incomingTransactionId !== '' && $currentTransactionId !== $incomingTransactionId) {
-        return false;
-    }
+    if ($currentTransactionId !== '' && $incomingTransactionId !== '' && $currentTransactionId !== $incomingTransactionId) return false;
 
     $sql = 'UPDATE payments SET status = ?, updated_at = ?';
     $params = [$newStatus, date('c')];
@@ -100,5 +106,25 @@ function transition_payment(PDO $pdo, int $paymentId, string $newStatus, ?string
     $params[] = $paymentId;
     $upd = $pdo->prepare($sql);
     $upd->execute($params);
+    return $upd->rowCount() === 1;
+}
+
+function record_refund_transaction(PDO $pdo, int $paymentId, string $refundTransactionId): bool
+{
+    if ($paymentId < 1 || trim($refundTransactionId) === '') throw new InvalidArgumentException('Invalid refund transaction id.');
+    ensure_payment_schema($pdo);
+
+    $stmt = $pdo->prepare('SELECT status, refund_transaction_id FROM payments WHERE id=? LIMIT 1');
+    $stmt->execute([$paymentId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row === false || (string)$row['status'] !== 'refunded') return false;
+
+    $current = trim((string)($row['refund_transaction_id'] ?? ''));
+    $incoming = trim($refundTransactionId);
+    if ($current !== '' && $current !== $incoming) return false;
+    if ($current === $incoming) return true;
+
+    $upd = $pdo->prepare('UPDATE payments SET refund_transaction_id=?, updated_at=? WHERE id=? AND status=\'refunded\' AND (refund_transaction_id IS NULL OR refund_transaction_id=\'\')');
+    $upd->execute([$incoming, date('c'), $paymentId]);
     return $upd->rowCount() === 1;
 }
