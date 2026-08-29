@@ -17,6 +17,7 @@ $tests = [
     'webhook_amount_validation_test.php',
     'webhook_event_id_test.php',
     'webhook_lifecycle_event_test.php',
+    'webhook_signature_freshness_test.php',
     'payment_transaction_identity_test.php',
     'payment_order_atomicity_test.php',
     'customer_financial_history_test.php',
