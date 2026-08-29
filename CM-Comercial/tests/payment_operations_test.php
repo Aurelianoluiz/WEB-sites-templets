@@ -17,21 +17,32 @@ if (capture_payment($pdo, $paymentId, 'tx-10')) {
     fwrite(STDERR, "FAIL: paid payment must not be captured twice\n");
     exit(1);
 }
-if (!refund_payment($pdo, $paymentId, 'tx-10-refund')) {
+if (!refund_payment($pdo, $paymentId, 'refund-10')) {
     fwrite(STDERR, "FAIL: paid payment should be refundable\n");
     exit(1);
 }
-if (refund_payment($pdo, $paymentId, 'tx-10-refund-2')) {
+if (refund_payment($pdo, $paymentId, 'refund-10-2')) {
     fwrite(STDERR, "FAIL: refunded payment must not be refunded twice\n");
     exit(1);
 }
 
-$stmt = $pdo->prepare('SELECT status, transaction_id FROM payments WHERE id=?');
+$stmt = $pdo->prepare('SELECT status, transaction_id, refund_transaction_id FROM payments WHERE id=?');
 $stmt->execute([$paymentId]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
-if (($row['status'] ?? '') !== 'refunded' || ($row['transaction_id'] ?? '') !== 'tx-10-refund') {
-    fwrite(STDERR, "FAIL: refund state/transaction mismatch\n");
+if (($row['status'] ?? '') !== 'refunded'
+    || ($row['transaction_id'] ?? '') !== 'tx-10'
+    || ($row['refund_transaction_id'] ?? '') !== 'refund-10') {
+    fwrite(STDERR, "FAIL: charge/refund transaction identity mismatch\n");
     exit(1);
+}
+
+$paymentId2 = upsert_payment($pdo, 11, 50.00, 'pix');
+try {
+    capture_payment($pdo, $paymentId2);
+    fwrite(STDERR, "FAIL: capture must require transaction id\n");
+    exit(1);
+} catch (InvalidArgumentException) {
+    // expected
 }
 
 echo "PASS: payment capture/refund operations\n";
