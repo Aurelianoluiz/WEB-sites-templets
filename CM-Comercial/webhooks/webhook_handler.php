@@ -102,21 +102,18 @@ function process_gateway_webhook(string $rawBody, array $headers): void
         (string)$event['type'],
         (string)$event['status'],
         $event['transaction_id'] ?? null,
-        (array)($event['raw'] ?? [])
+        (array)($event['raw'] ?? []),
+        static function (PDO $transactionalPdo, int $paymentId, string $paymentStatus) use ($orderId): void {
+            $orderStmt = $transactionalPdo->prepare('SELECT status FROM orders WHERE id=?');
+            $orderStmt->execute([$orderId]);
+            $orderStatus = (string)($orderStmt->fetchColumn() ?: 'pending');
+            $decision = payment_order_decision($paymentStatus, $orderStatus);
+            apply_order_decision($transactionalPdo, $orderId, $decision, null);
+            $transactionalPdo->prepare('UPDATE orders SET payment_status=? WHERE id=?')->execute([$paymentStatus, $orderId]);
+        }
     );
 
     // Exact webhook retries are acknowledged but must not repeat downstream
     // order-state updates or any future downstream side effects.
     if (!$isNewEvent) return;
-
-    $statusStmt = $pdo->prepare('SELECT status FROM payments WHERE id=?');
-    $statusStmt->execute([$paymentId]);
-    $paymentStatus = (string)($statusStmt->fetchColumn() ?: 'pending');
-
-    $orderStmt = $pdo->prepare('SELECT status FROM orders WHERE id=?');
-    $orderStmt->execute([$orderId]);
-    $orderStatus = (string)($orderStmt->fetchColumn() ?: 'pending');
-    $decision = payment_order_decision($paymentStatus, $orderStatus);
-    apply_order_decision($pdo, $orderId, $decision, null);
-    $pdo->prepare('UPDATE orders SET payment_status=? WHERE id=?')->execute([$paymentStatus, $orderId]);
 }
