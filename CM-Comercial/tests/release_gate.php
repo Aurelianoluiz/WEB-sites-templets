@@ -18,6 +18,7 @@ $required = [
     __DIR__ . '/webhook_amount_validation_test.php',
     __DIR__ . '/webhook_event_id_test.php',
     __DIR__ . '/webhook_lifecycle_event_test.php',
+    __DIR__ . '/webhook_signature_freshness_test.php',
     __DIR__ . '/payment_transaction_identity_test.php',
     __DIR__ . '/payment_order_atomicity_test.php',
     __DIR__ . '/customer_financial_history_test.php',
