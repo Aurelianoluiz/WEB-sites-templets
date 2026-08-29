@@ -62,7 +62,11 @@ function verify_mp_webhook_signature(string $body, array $headers, string $secre
     $decoded = json_decode($body, true);
     if (is_array($decoded)) $dataId = (string)($decoded['data']['id'] ?? '');
     if ($dataId === '') $dataId = (string)($_GET['data.id'] ?? $_GET['id'] ?? '');
-    if ($ts === '' || $v1 === '' || $dataId === '') return false;
+    if ($ts === '' || $v1 === '' || $dataId === '' || !ctype_digit($ts)) return false;
+
+    $maxSkew = (int)(getenv('MP_WEBHOOK_MAX_SKEW') ?: 300);
+    if ($maxSkew < 1) $maxSkew = 300;
+    if (abs(time() - (int)$ts) > $maxSkew) return false;
 
     $manifest = 'id:' . $dataId . ';request-id:' . $requestId . ';ts:' . $ts . ';';
     $expected = hash_hmac('sha256', $manifest, $secret);
@@ -87,8 +91,6 @@ function process_gateway_webhook(string $rawBody, array $headers): void
     $paymentId = (int)($paymentRow['id'] ?? 0);
     if ($paymentId < 1) throw new RuntimeException('Pagamento interno não encontrado.');
 
-    // Never change the internal payment state from a signed webhook whose
-    // provider amount does not match the amount created internally.
     $gatewayAmount = isset($event['raw']['transaction_amount']) ? (float)$event['raw']['transaction_amount'] : null;
     $internalAmount = round((float)($paymentRow['amount'] ?? 0), 2);
     if ($gatewayAmount === null || round($gatewayAmount, 2) !== $internalAmount) {
@@ -103,7 +105,7 @@ function process_gateway_webhook(string $rawBody, array $headers): void
         (string)$event['status'],
         $event['transaction_id'] ?? null,
         (array)($event['raw'] ?? []),
-        static function (PDO $transactionalPdo, int $paymentId, string $paymentStatus) use ($orderId): void {
+        static function (PDO $transactionalPdo, int $paymentId, string $paymentStatus, ?string $transactionId) use ($orderId): void {
             $orderStmt = $transactionalPdo->prepare('SELECT status FROM orders WHERE id=?');
             $orderStmt->execute([$orderId]);
             $orderStatus = (string)($orderStmt->fetchColumn() ?: 'pending');
@@ -113,7 +115,5 @@ function process_gateway_webhook(string $rawBody, array $headers): void
         }
     );
 
-    // Exact webhook retries are acknowledged but must not repeat downstream
-    // order-state updates or any future downstream side effects.
     if (!$isNewEvent) return;
 }
