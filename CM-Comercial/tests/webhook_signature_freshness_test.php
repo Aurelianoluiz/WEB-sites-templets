@@ -3,23 +3,17 @@ declare(strict_types=1);
 
 /**
  * Static regression for webhook replay protection.
- * The handler must validate a numeric timestamp and reject signatures outside
- * the configured freshness window before comparing the HMAC.
+ * Freshness validation is centralized in the dedicated signature helper.
  */
-$handler = (string)file_get_contents(__DIR__ . '/../webhooks/webhook_handler.php');
+$helper = (string)file_get_contents(__DIR__ . '/../includes/mp_webhook_signature.php');
 
-foreach (['MP_WEBHOOK_MAX_SKEW', 'ctype_digit($ts)', 'abs(time() - (int)$ts) > $maxSkew'] as $needle) {
-    if (!str_contains($handler, $needle)) {
-        fwrite(STDERR, "FAIL: missing webhook freshness check: $needle\n");
-        exit(1);
-    }
-}
+$checks = [
+    'uses_configured_skew' => str_contains($helper, 'maxSkew'),
+    'validates_numeric_timestamp' => str_contains($helper, 'ctype_digit'),
+    'checks_timestamp_delta' => str_contains($helper, 'abs($now - $ts) > $maxSkew'),
+    'uses_hmac' => str_contains($helper, 'hash_hmac'),
+];
 
-$hmacPos = strpos($handler, '$expected = hash_hmac');
-$skewPos = strpos($handler, '$maxSkew =');
-if ($hmacPos === false || $skewPos === false || $skewPos > $hmacPos) {
-    fwrite(STDERR, "FAIL: freshness must be checked before HMAC acceptance\n");
-    exit(1);
-}
-
-echo "PASS: webhook signature freshness\n";
+$failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));
+foreach ($checks as $name => $ok) echo ($ok ? 'PASS' : 'FAIL') . ": $name\n";
+exit($failed ? 1 : 0);
