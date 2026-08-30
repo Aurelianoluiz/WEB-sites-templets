@@ -10,12 +10,21 @@ Este documento fecha o trabalho de código e define as ações externas necessá
 - Diretório de dados/logs fora do webroot quando aplicável.
 - Permissões mínimas necessárias para o processo PHP.
 
+Antes de liberar a aplicação, execute no servidor:
+
+`php production_preflight.php`
+
+O comando deve terminar com `PRODUCTION_PREFLIGHT_PASS`.
+
 ## 2. Configuração
 
 Copie `.env.example` para a configuração segura do ambiente e forneça:
 
-- `MP_ACCESS_TOKEN`
-- `MP_WEBHOOK_SECRET`
+- `APP_ENV=production`
+- `APP_URL=https://...`
+- `PAYMENT_GATEWAY=manual` ou `mercadopago`
+- `MP_ACCESS_TOKEN` quando usar Mercado Pago
+- `MP_WEBHOOK_SECRET` quando usar Mercado Pago
 - `MP_WEBHOOK_MAX_SKEW` (padrão: 300)
 
 Nunca publique esses valores no Git.
@@ -23,10 +32,11 @@ Nunca publique esses valores no Git.
 ## 3. Inicialização
 
 1. Coloque os arquivos no servidor.
-2. Execute `setup.php` uma única vez em ambiente controlado.
+2. Execute `setup.php` uma única vez em ambiente controlado, caso a instalação ainda não possua banco.
 3. Crie o administrador.
-4. Remova ou bloqueie `setup.php`.
+4. Remova ou bloqueie `setup.php` depois da instalação.
 5. Confirme o banco e os diretórios de dados.
+6. Execute `php production_preflight.php` novamente.
 
 ## 4. Pagamentos
 
@@ -65,6 +75,7 @@ e também:
 A release só pode ser marcada como produção-aprovada depois de obter evidência de:
 
 - CI concluída com sucesso;
+- `production_preflight.php` aprovado no servidor;
 - HTTPS ativo;
 - banco operacional;
 - Mercado Pago sandbox validado;
