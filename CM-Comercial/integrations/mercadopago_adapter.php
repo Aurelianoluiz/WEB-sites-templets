@@ -92,8 +92,6 @@ final class MercadoPagoAdapter implements PaymentGatewayAdapter
         $status = $this->normalizeStatus((string)($payment['status'] ?? 'pending'));
         $transactionId = (string)($payment['id'] ?? $dataId);
 
-        // Keep retries of the same notification idempotent while allowing
-        // legitimate lifecycle changes for the same payment to be distinct.
         $eventFingerprint = implode('|', [
             'mp',
             $type,
@@ -152,10 +150,14 @@ final class MercadoPagoAdapter implements PaymentGatewayAdapter
     private function get(string $path): array { return $this->request('GET', $path); }
     private function normalizeStatus(string $status): string
     {
-        return match (strtolower($status)) {
-            'approved' => 'paid', 'authorized' => 'authorized', 'rejected' => 'failed',
-            'cancelled', 'canceled' => 'cancelled', 'refunded', 'charged_back' => 'refunded',
-            default => 'pending',
+        return match (strtolower(trim($status))) {
+            'pending', 'in_process', 'in_mediation' => 'pending',
+            'approved' => 'paid',
+            'authorized' => 'authorized',
+            'rejected' => 'failed',
+            'cancelled', 'canceled' => 'cancelled',
+            'refunded', 'charged_back' => 'refunded',
+            default => throw new InvalidArgumentException('Status de pagamento Mercado Pago não suportado: ' . $status),
         };
     }
     private function firstName(string $name): string { return trim(explode(' ', trim($name))[0] ?? 'Cliente'); }
