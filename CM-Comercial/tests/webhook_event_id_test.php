@@ -5,9 +5,11 @@ declare(strict_types=1);
 $source = (string)file_get_contents(__DIR__ . '/../integrations/mercadopago_adapter.php');
 
 $checks = [
-    'uses_type_and_data_id' => str_contains($source, "$eventId = 'mp-' . $type . '-' . $dataId;"),
-    'does_not_use_request_id' => !str_contains($source, "($headers['x-request-id'] ??"),
-    'does_not_use_date_created_fallback' => !str_contains($source, "$data['date_created'] ??"),
+    'uses_type_action_data_id' => str_contains($source, "'mp',\n            $type,\n            $action,\n            $dataId,"),
+    'uses_status_and_transaction' => str_contains($source, "$status,\n            $transactionId,"),
+    'hashes_fingerprint' => str_contains($source, '$eventId = hash(\'sha256\', $eventFingerprint);'),
+    'does_not_use_request_id' => !str_contains($source, 'x-request-id'),
+    'does_not_use_date_created_fallback' => !str_contains($source, 'date_created'),
 ];
 
 $failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));
