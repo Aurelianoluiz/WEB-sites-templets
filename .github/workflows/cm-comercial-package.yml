@@ -32,6 +32,11 @@ jobs:
             --exclude='uploads/*' \
             --exclude='BACKUP/'
           (cd dist/package && zip -qr ../CM-Comercial-release.zip CM-Comercial)
+          unzip -tq dist/CM-Comercial-release.zip
+          if unzip -l dist/CM-Comercial-release.zip | grep -Eq '(^|/)(\.env|\.env\.|.*\.sqlite3?|.*\.db|.*\.log)($|/)' ; then
+            echo 'FAIL: sensitive artifact detected in release ZIP'
+            exit 1
+          fi
           sha256sum dist/CM-Comercial-release.zip | tee dist/CM-Comercial-release.zip.sha256
 
       - name: Upload release artifact
