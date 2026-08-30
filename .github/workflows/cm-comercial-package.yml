@@ -1,0 +1,47 @@
+name: CM Comercial Release Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'cm-comercial-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build safe release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          tar --exclude='.env' \
+              --exclude='.env.*' \
+              --exclude='CM-Comercial/data/*.sqlite' \
+              --exclude='CM-Comercial/data/*.sqlite3' \
+              --exclude='CM-Comercial/data/*.db' \
+              --exclude='CM-Comercial/data/*.log' \
+              --exclude='CM-Comercial/uploads/*' \
+              --exclude='CM-Comercial/BACKUP' \
+              -C . -czf dist/CM-Comercial-source.tgz CM-Comercial
+          unzip -q <(tar -xOzf dist/CM-Comercial-source.tgz CM-Comercial) 2>/dev/null || true
+          python3 - <<'PY'
+          import hashlib, pathlib
+          p = pathlib.Path('dist/CM-Comercial-source.tgz')
+          print('SHA256', hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cm-comercial-release
+          path: dist/CM-Comercial-source.tgz
+          if-no-files-found: error
+          retention-days: 30
