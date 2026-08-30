@@ -8,6 +8,7 @@ Data: 2026-08-30
 - Fluxo de loja, cliente/admin, estoque, pagamentos, webhooks, segurança, auditoria e Release Gate versionados.
 - Suíte determinística de validação atualizada com as regressões de pagamento, webhook, estoque, configuração e adapter Mercado Pago.
 - `production_preflight.php` criado para validar requisitos mínimos do servidor antes da ativação.
+- Workflow de empacotamento criado em `.github/workflows/cm-comercial-package.yml` para gerar ZIP + SHA-256 da versão, sem `.env`, bancos, logs, uploads privados ou backups.
 
 ## Fechamento da release
 
@@ -18,6 +19,7 @@ Data: 2026-08-30
 - Documentação alinhada ao estado real.
 - Backup Git com pontos de restauração versionados.
 - Preflight de produção para PHP, extensões, HTTPS/URL e configuração do gateway.
+- Empacotamento seguro da release automatizado pelo GitHub Actions.
 
 ### Ainda depende de infraestrutura externa
 
@@ -32,6 +34,7 @@ Data: 2026-08-30
 - Testar captura, cancelamento e estorno reais.
 - Configurar logs, monitoramento e retenção.
 - Fazer backup externo do banco e validar restauração.
+- Executar o workflow de empacotamento e validar o SHA-256 do ZIP gerado.
 
 ## Status
 
