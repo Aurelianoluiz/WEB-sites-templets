@@ -39,6 +39,7 @@ $tests = [
     'stock_reconciliation_test.php',
     'stock_payment_policy_validation_test.php',
     'payment_status_normalization_test.php',
+    'payment_status_normalization_runtime_test.php',
     'configuration_surface_test.php',
 ];
 
