@@ -40,6 +40,7 @@ $tests = [
     'stock_payment_policy_validation_test.php',
     'payment_status_normalization_test.php',
     'payment_status_normalization_runtime_test.php',
+    'mercadopago_status_validation_test.php',
     'configuration_surface_test.php',
 ];
 
