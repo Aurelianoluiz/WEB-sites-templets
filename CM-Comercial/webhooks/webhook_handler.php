@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/payment_core.php';
 require_once __DIR__ . '/../includes/payment_order_policy.php';
 require_once __DIR__ . '/../includes/checkout_payment.php';
+require_once __DIR__ . '/../includes/mp_webhook_signature.php';
 require_once __DIR__ . '/../integrations/payment_service.php';
 require_once __DIR__ . '/../integrations/payment_adapter.php';
 require_once __DIR__ . '/../integrations/mercadopago_adapter.php';
@@ -43,34 +44,6 @@ try {
     error_log('[webhook] processing failed: ' . $e->getMessage());
     http_response_code(500);
     echo json_encode(['received' => false], JSON_UNESCAPED_UNICODE);
-}
-
-function verify_mp_webhook_signature(string $body, array $headers, string $secret): bool
-{
-    $signature = $headers['x-signature'] ?? '';
-    $requestId = $headers['x-request-id'] ?? '';
-    if ($signature === '' || $requestId === '') return false;
-
-    $parts = [];
-    foreach (explode(',', $signature) as $part) {
-        [$key, $value] = array_pad(explode('=', trim($part), 2), 2, '');
-        $parts[strtolower(trim($key))] = trim($value);
-    }
-    $ts = $parts['ts'] ?? '';
-    $v1 = $parts['v1'] ?? '';
-    $dataId = '';
-    $decoded = json_decode($body, true);
-    if (is_array($decoded)) $dataId = (string)($decoded['data']['id'] ?? '');
-    if ($dataId === '') $dataId = (string)($_GET['data.id'] ?? $_GET['id'] ?? '');
-    if ($ts === '' || $v1 === '' || $dataId === '' || !ctype_digit($ts)) return false;
-
-    $maxSkew = (int)(getenv('MP_WEBHOOK_MAX_SKEW') ?: 300);
-    if ($maxSkew < 1) $maxSkew = 300;
-    if (abs(time() - (int)$ts) > $maxSkew) return false;
-
-    $manifest = 'id:' . $dataId . ';request-id:' . $requestId . ';ts:' . $ts . ';';
-    $expected = hash_hmac('sha256', $manifest, $secret);
-    return hash_equals($expected, $v1);
 }
 
 function process_gateway_webhook(string $rawBody, array $headers): void
