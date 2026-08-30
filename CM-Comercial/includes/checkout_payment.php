@@ -20,7 +20,11 @@ function initiate_checkout_payment(PDO $pdo, int $orderId, float $amount, string
         try {
             $order = fetch_order_for_payment($pdo, $orderId);
             if (!$order) throw new RuntimeException('Pedido não encontrado.');
-            $result = $adapter->createPayment($order, $customer, array_merge($paymentData, ['method' => $method]));
+            $gatewayPaymentData = array_merge($paymentData, [
+                'method' => $method,
+                'idempotency_key' => 'cm-payment-' . $paymentId,
+            ]);
+            $result = $adapter->createPayment($order, $customer, $gatewayPaymentData);
             $paymentStatus = (string)($result['status'] ?? 'pending');
             $gatewayData = (array)($result['raw'] ?? []);
             apply_gateway_event(
