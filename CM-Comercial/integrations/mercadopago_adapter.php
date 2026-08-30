@@ -19,9 +19,10 @@ final class MercadoPagoAdapter implements PaymentGatewayAdapter
 
     public function createPayment(array $order, array $customer, array $paymentData): array
     {
-        $method = (string)($paymentData['method'] ?? 'pix');
-        $amount = round((float)($order['total'] ?? 0), 2);
-        if ($amount <= 0) throw new InvalidArgumentException('Valor de pagamento inválido.');
+        $method = strtolower(trim((string)($paymentData['method'] ?? 'pix')));
+        $amount = (float)($order['total'] ?? 0);
+        if (!is_finite($amount) || $amount <= 0) throw new InvalidArgumentException('Valor de pagamento inválido.');
+        $amount = round($amount, 2);
 
         $email = trim((string)($customer['email'] ?? $order['email'] ?? ''));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
