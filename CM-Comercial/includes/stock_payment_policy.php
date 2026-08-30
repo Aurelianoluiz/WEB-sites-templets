@@ -8,10 +8,11 @@ declare(strict_types=1);
 function stock_action_for_payment(string $paymentStatus): string
 {
     return match (strtolower(trim($paymentStatus))) {
+        'pending', 'authorized' => 'keep_reservation',
         'paid' => 'commit_reservation',
         'failed', 'cancelled' => 'release_reservation',
         'refunded' => 'review_refund_stock',
-        default => 'keep_reservation',
+        default => throw new InvalidArgumentException('Unsupported payment status for stock policy.'),
     };
 }
 
