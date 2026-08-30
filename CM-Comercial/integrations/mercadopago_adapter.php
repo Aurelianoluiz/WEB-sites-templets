@@ -58,8 +58,16 @@ final class MercadoPagoAdapter implements PaymentGatewayAdapter
             throw new InvalidArgumentException('Método de pagamento não suportado.');
         }
 
-        $key = 'cm-order-' . (int)$order['id'] . '-' . hash('sha256', $method . '|' . $amount);
-        $response = $this->request('POST', '/payments', $body, $key);
+        $idempotencyKey = trim((string)($paymentData['idempotency_key'] ?? ''));
+        if ($idempotencyKey !== '') {
+            if (!preg_match('/^[A-Za-z0-9._:-]{1,255}$/', $idempotencyKey)) {
+                throw new InvalidArgumentException('Chave de idempotência inválida.');
+            }
+        } else {
+            $idempotencyKey = 'cm-order-' . (int)$order['id'] . '-' . hash('sha256', $method . '|' . $amount);
+        }
+
+        $response = $this->request('POST', '/payments', $body, $idempotencyKey);
         $status = $this->normalizeStatus((string)($response['status'] ?? 'pending'));
 
         $raw = $response;
