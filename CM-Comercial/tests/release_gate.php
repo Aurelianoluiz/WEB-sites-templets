@@ -43,6 +43,7 @@ $required = [
     __DIR__ . '/payment_status_normalization_runtime_test.php',
     __DIR__ . '/mercadopago_status_validation_test.php',
     __DIR__ . '/mercadopago_payment_input_validation_test.php',
+    __DIR__ . '/checkout_idempotency_scope_test.php',
     __DIR__ . '/configuration_surface_test.php',
 ];
 
@@ -59,5 +60,4 @@ if ($missing !== []) {
     fwrite(STDERR, 'FAIL: missing validation assets: ' . implode(', ', array_map('basename', $missing)) . "\n");
     exit(1);
 }
-
 echo "RELEASE_GATE_ASSETS_READY\n";
