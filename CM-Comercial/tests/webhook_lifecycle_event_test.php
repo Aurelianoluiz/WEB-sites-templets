@@ -18,7 +18,7 @@ $checks = [
 $start = strpos($adapter, '$eventFingerprint');
 $end = strpos($adapter, '$eventId', $start === false ? 0 : $start);
 if ($start === false || $end === false) {
-    fwrite(STDERR, "FAIL: lifecycle fingerprint block not found\n");
+    fwrite(STDERR, 'FAIL: lifecycle fingerprint block not found' . PHP_EOL);
     exit(1);
 }
 
@@ -28,5 +28,5 @@ foreach (['$type', '$action', '$dataId', '$status', '$transactionId'] as $token)
 }
 
 $failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));
-foreach ($checks as $name => $ok) echo ($ok ? 'PASS' : 'FAIL') . ": $name\n";
+foreach ($checks as $name => $ok) echo ($ok ? 'PASS' : 'FAIL') . ": $name" . PHP_EOL;
 exit($failed ? 1 : 0);
