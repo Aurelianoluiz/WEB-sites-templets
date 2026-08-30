@@ -46,11 +46,19 @@ function apply_gateway_event(
     array $payload = [],
     ?callable $afterTransition = null
 ): bool {
-    if ($paymentId < 1 || trim($eventId) === '' || strlen($eventId) > 255) {
+    $eventId = trim($eventId);
+    $eventType = trim($eventType);
+    $normalizedStatus = strtolower(trim($status));
+    $allowedStatuses = ['authorized', 'paid', 'failed', 'cancelled', 'refunded'];
+
+    if ($paymentId < 1 || $eventId === '' || strlen($eventId) > 255) {
         throw new InvalidArgumentException('Invalid payment event.');
     }
-    if (trim($eventType) === '' || strlen($eventType) > 120) {
+    if ($eventType === '' || strlen($eventType) > 120) {
         throw new InvalidArgumentException('Invalid payment event type.');
+    }
+    if (!in_array($normalizedStatus, $allowedStatuses, true)) {
+        throw new InvalidArgumentException('Invalid payment event status.');
     }
 
     $ownsTransaction = false;
@@ -61,10 +69,10 @@ function apply_gateway_event(
 
     try {
         ensure_payment_schema($pdo);
-        $inserted = record_payment_event($pdo, $paymentId, trim($eventId), trim($eventType), $payload);
+        $inserted = record_payment_event($pdo, $paymentId, $eventId, $eventType, $payload);
         if (!$inserted) {
             $existing = $pdo->prepare('SELECT payment_id FROM payment_events WHERE event_id = ? LIMIT 1');
-            $existing->execute([trim($eventId)]);
+            $existing->execute([$eventId]);
             $existingPaymentId = $existing->fetchColumn();
             if ((int)$existingPaymentId !== $paymentId) {
                 throw new RuntimeException('Payment event id already belongs to another payment.');
@@ -73,12 +81,12 @@ function apply_gateway_event(
             return false;
         }
 
-        if (!transition_payment($pdo, $paymentId, $status, $transactionId)) {
+        if (!transition_payment($pdo, $paymentId, $normalizedStatus, $transactionId)) {
             throw new RuntimeException('Invalid payment transition.');
         }
 
         if ($afterTransition !== null) {
-            $afterTransition($pdo, $paymentId, $status, $transactionId);
+            $afterTransition($pdo, $paymentId, $normalizedStatus, $transactionId);
         }
 
         if ($ownsTransaction) $pdo->commit();
