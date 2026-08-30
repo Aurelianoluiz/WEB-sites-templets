@@ -40,6 +40,7 @@ $required = [
     __DIR__ . '/stock_reconciliation_test.php',
     __DIR__ . '/stock_payment_policy_validation_test.php',
     __DIR__ . '/payment_status_normalization_test.php',
+    __DIR__ . '/payment_status_normalization_runtime_test.php',
     __DIR__ . '/configuration_surface_test.php',
 ];
 
