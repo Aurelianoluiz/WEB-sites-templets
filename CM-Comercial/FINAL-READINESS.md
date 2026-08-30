@@ -1,33 +1,37 @@
 # CM Comercial — Final Readiness
 
-Data: 2026-08-27
+Data: 2026-08-30
 
-## Desenvolvimento
+## Desenvolvimento técnico
 
-- 17/17 fases técnicas registradas no projeto: concluídas.
-- Fluxo de loja, cliente/admin, estoque e pagamentos documentado.
+- 32/32 fases de desenvolvimento técnico concluídas.
+- Fluxo de loja, cliente/admin, estoque, pagamentos, webhooks, segurança, auditoria e Release Gate versionados.
+- Suíte determinística de validação atualizada com as regressões de pagamento, webhook, estoque, configuração e adapter Mercado Pago.
 
-## Evidências disponíveis
+## Fechamento da release
 
-- 12 arquivos PHP do pacote 21–34 passaram por `php -l` na validação registrada.
-- CI GitHub Actions está configurada para PHP 8.2, 8.3 e 8.4 com PDO/SQLite.
-- Testes de domínio, integração e segurança estão versionados.
+### Concluído no código/repositório
 
-## Bloqueios para produção
+- E2E: fluxos e regressões necessários estão preparados no projeto.
+- Release Gate: inventário centralizado e consistência entre runner/gate verificável.
+- Documentação: roadmap, checklist, readiness e procedimento de ativação alinhados ao estado real.
+- Backup Git: existem pontos de restauração versionados.
 
-A release NÃO deve ser declarada produção-aprovada até haver evidência de execução dos gates externos:
+### Ainda depende de infraestrutura externa
 
-1. CI executada com sucesso no GitHub Actions.
-2. Testes com banco configurado.
-3. E2E em servidor de homologação.
-4. Mercado Pago em sandbox com webhook HTTPS autenticado.
-5. Testes de captura/estorno.
-6. HTTPS, cookies, headers e permissões verificados no servidor.
-7. Logs e retenção verificados.
-8. Backup externo do banco confirmado.
+- Executar CI GitHub Actions e registrar evidência do resultado.
+- Configurar banco no servidor de homologação/produção.
+- Configurar hospedagem PHP 8.2+.
+- Ativar HTTPS.
+- Configurar `MP_ACCESS_TOKEN` e `MP_WEBHOOK_SECRET` no ambiente.
+- Configurar webhook HTTPS no Mercado Pago.
+- Executar E2E real com sandbox.
+- Testar captura, cancelamento e estorno reais.
+- Configurar logs, monitoramento e retenção.
+- Fazer backup externo do banco e validar restauração.
 
 ## Status
 
-**Release Candidate — não aprovada para produção ainda.**
+**Release Candidate tecnicamente preparado — ativação externa ainda não realizada.**
 
-O próximo marco é executar os gates acima e então fechar a Etapa 34. A Etapa 35 será o backup final e o ZIP final da versão homologada.
+Não é seguro declarar produção-aprovada somente com testes do repositório. A ativação depende das credenciais e da infraestrutura descritas em `PRODUCTION-ACTIVATION.md`.
