@@ -3,13 +3,13 @@ declare(strict_types=1);
 
 /**
  * Static regression for Mercado Pago lifecycle-event identity.
- * A production/update event must distinguish action/status changes even when
- * data.id remains the same, while transport headers must not define identity.
+ * Lifecycle identity must include provider type, action, data id, status and
+ * transaction id; transport request headers must not define event identity.
  */
 $adapter = (string)file_get_contents(__DIR__ . '/../integrations/mercadopago_adapter.php');
 
 $checks = [
-    'action_is_present' => str_contains($adapter, "$action = (string)($data['action'] ?? '');"),
+    'action_is_present' => str_contains($adapter, '$action = (string)($data[\'action\'] ?? \'\');'),
     'status_is_normalized' => str_contains($adapter, '$status = $this->normalizeStatus'),
     'event_fingerprint_exists' => str_contains($adapter, '$eventFingerprint = implode'),
     'request_id_not_used' => !str_contains($adapter, 'x-request-id'),
