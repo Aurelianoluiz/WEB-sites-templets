@@ -34,6 +34,7 @@ $tests = [
     'stock_payment_idempotency_test.php',
     'stock_payment_bridge_test.php',
     'stock_reconciliation_test.php',
+    'configuration_surface_test.php',
 ];
 
 $php = PHP_BINARY;
