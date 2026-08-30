@@ -38,6 +38,7 @@ $required = [
     __DIR__ . '/stock_payment_idempotency_test.php',
     __DIR__ . '/stock_payment_bridge_test.php',
     __DIR__ . '/stock_reconciliation_test.php',
+    __DIR__ . '/stock_payment_policy_validation_test.php',
     __DIR__ . '/configuration_surface_test.php',
 ];
 
