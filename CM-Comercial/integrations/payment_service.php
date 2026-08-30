@@ -29,11 +29,12 @@ function create_checkout_payment(PDO $pdo, int $orderId, float $amount, string $
  * Applies a normalized provider event exactly once.
  * Returns true only when this call inserted and applied a new event.
  * An exact duplicate for the same payment returns false so callers can avoid
- * repeating downstream side effects (for example order-state updates).
+ * repeating downstream side effects.
  * A duplicate event id belonging to another payment is rejected.
  *
- * The optional callback runs before the transaction commits, allowing
- * payment and downstream order mutations to become one atomic operation.
+ * When an outer transaction is already open, this function participates in it
+ * instead of attempting a nested PDO transaction. Otherwise it creates and
+ * owns a transaction for the event.
  */
 function apply_gateway_event(
     PDO $pdo,
@@ -45,24 +46,30 @@ function apply_gateway_event(
     array $payload = [],
     ?callable $afterTransition = null
 ): bool {
-    $eventType = trim($eventType);
-    $status = strtolower(trim($status));
-    if ($paymentId < 1 || $eventId === '' || strlen($eventId) > 255 || $eventType === '') {
+    if ($paymentId < 1 || trim($eventId) === '' || strlen($eventId) > 255) {
         throw new InvalidArgumentException('Invalid payment event.');
     }
+    if (trim($eventType) === '' || strlen($eventType) > 120) {
+        throw new InvalidArgumentException('Invalid payment event type.');
+    }
 
-    ensure_payment_schema($pdo);
-    $pdo->beginTransaction();
+    $ownsTransaction = false;
+    if (!$pdo->inTransaction()) {
+        $pdo->beginTransaction();
+        $ownsTransaction = true;
+    }
+
     try {
-        $inserted = record_payment_event($pdo, $paymentId, $eventId, $eventType, $payload);
+        ensure_payment_schema($pdo);
+        $inserted = record_payment_event($pdo, $paymentId, trim($eventId), trim($eventType), $payload);
         if (!$inserted) {
             $existing = $pdo->prepare('SELECT payment_id FROM payment_events WHERE event_id = ? LIMIT 1');
-            $existing->execute([$eventId]);
+            $existing->execute([trim($eventId)]);
             $existingPaymentId = $existing->fetchColumn();
             if ((int)$existingPaymentId !== $paymentId) {
                 throw new RuntimeException('Payment event id already belongs to another payment.');
             }
-            $pdo->commit();
+            if ($ownsTransaction) $pdo->commit();
             return false;
         }
 
@@ -74,10 +81,10 @@ function apply_gateway_event(
             $afterTransition($pdo, $paymentId, $status, $transactionId);
         }
 
-        $pdo->commit();
+        if ($ownsTransaction) $pdo->commit();
         return true;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
         throw $e;
     }
 }
