@@ -45,7 +45,9 @@ function apply_gateway_event(
     array $payload = [],
     ?callable $afterTransition = null
 ): bool {
-    if ($paymentId < 1 || $eventId === '' || strlen($eventId) > 255) {
+    $eventType = trim($eventType);
+    $status = strtolower(trim($status));
+    if ($paymentId < 1 || $eventId === '' || strlen($eventId) > 255 || $eventType === '') {
         throw new InvalidArgumentException('Invalid payment event.');
     }
 
