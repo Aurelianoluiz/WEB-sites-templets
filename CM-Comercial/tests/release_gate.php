@@ -42,6 +42,7 @@ $required = [
     __DIR__ . '/payment_status_normalization_test.php',
     __DIR__ . '/payment_status_normalization_runtime_test.php',
     __DIR__ . '/mercadopago_status_validation_test.php',
+    __DIR__ . '/mercadopago_payment_input_validation_test.php',
     __DIR__ . '/configuration_surface_test.php',
 ];
 
