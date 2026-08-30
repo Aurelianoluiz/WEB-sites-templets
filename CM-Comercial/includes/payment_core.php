@@ -80,6 +80,12 @@ function upsert_payment(PDO $pdo, int $orderId, float $amount, string $method = 
 
 function record_payment_event(PDO $pdo, int $paymentId, string $eventId, string $eventType, array $payload = []): bool
 {
+    if ($paymentId < 1) throw new InvalidArgumentException('Invalid payment id.');
+    $eventId = trim($eventId);
+    $eventType = trim($eventType);
+    if ($eventId === '' || strlen($eventId) > 255) throw new InvalidArgumentException('Invalid payment event id.');
+    if ($eventType === '' || strlen($eventType) > 100) throw new InvalidArgumentException('Invalid payment event type.');
+
     $stmt = $pdo->prepare('INSERT OR IGNORE INTO payment_events (payment_id,event_id,event_type,payload,created_at) VALUES (?,?,?,?,?)');
     $stmt->execute([$paymentId, $eventId, $eventType, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), date('c')]);
     return $stmt->rowCount() === 1;
