@@ -21,27 +21,25 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf dist
-          mkdir -p dist
-          tar --exclude='.env' \
-              --exclude='.env.*' \
-              --exclude='CM-Comercial/data/*.sqlite' \
-              --exclude='CM-Comercial/data/*.sqlite3' \
-              --exclude='CM-Comercial/data/*.db' \
-              --exclude='CM-Comercial/data/*.log' \
-              --exclude='CM-Comercial/uploads/*' \
-              --exclude='CM-Comercial/BACKUP' \
-              -C . -czf dist/CM-Comercial-source.tgz CM-Comercial
-          unzip -q <(tar -xOzf dist/CM-Comercial-source.tgz CM-Comercial) 2>/dev/null || true
-          python3 - <<'PY'
-          import hashlib, pathlib
-          p = pathlib.Path('dist/CM-Comercial-source.tgz')
-          print('SHA256', hashlib.sha256(p.read_bytes()).hexdigest())
-          PY
+          mkdir -p dist/package/CM-Comercial
+          rsync -a CM-Comercial/ dist/package/CM-Comercial/ \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='data/*.sqlite' \
+            --exclude='data/*.sqlite3' \
+            --exclude='data/*.db' \
+            --exclude='data/*.log' \
+            --exclude='uploads/*' \
+            --exclude='BACKUP/'
+          (cd dist/package && zip -qr ../CM-Comercial-release.zip CM-Comercial)
+          sha256sum dist/CM-Comercial-release.zip | tee dist/CM-Comercial-release.zip.sha256
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: cm-comercial-release
-          path: dist/CM-Comercial-source.tgz
+          path: |
+            dist/CM-Comercial-release.zip
+            dist/CM-Comercial-release.zip.sha256
           if-no-files-found: error
           retention-days: 30
