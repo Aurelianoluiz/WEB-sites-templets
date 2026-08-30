@@ -7,15 +7,17 @@ Data: 2026-08-30
 - 32/32 fases de desenvolvimento técnico concluídas.
 - Fluxo de loja, cliente/admin, estoque, pagamentos, webhooks, segurança, auditoria e Release Gate versionados.
 - Suíte determinística de validação atualizada com as regressões de pagamento, webhook, estoque, configuração e adapter Mercado Pago.
+- `production_preflight.php` criado para validar requisitos mínimos do servidor antes da ativação.
 
 ## Fechamento da release
 
 ### Concluído no código/repositório
 
-- E2E: fluxos e regressões necessários estão preparados no projeto.
-- Release Gate: inventário centralizado e consistência entre runner/gate verificável.
-- Documentação: roadmap, checklist, readiness e procedimento de ativação alinhados ao estado real.
-- Backup Git: existem pontos de restauração versionados.
+- Fluxos E2E e regressões necessários preparados.
+- Release Gate com inventário centralizado e consistência verificável.
+- Documentação alinhada ao estado real.
+- Backup Git com pontos de restauração versionados.
+- Preflight de produção para PHP, extensões, HTTPS/URL e configuração do gateway.
 
 ### Ainda depende de infraestrutura externa
 
@@ -23,8 +25,9 @@ Data: 2026-08-30
 - Configurar banco no servidor de homologação/produção.
 - Configurar hospedagem PHP 8.2+.
 - Ativar HTTPS.
-- Configurar `MP_ACCESS_TOKEN` e `MP_WEBHOOK_SECRET` no ambiente.
+- Configurar `MP_ACCESS_TOKEN` e `MP_WEBHOOK_SECRET` no ambiente, quando Mercado Pago estiver ativo.
 - Configurar webhook HTTPS no Mercado Pago.
+- Executar `php production_preflight.php` no servidor e obter `PRODUCTION_PREFLIGHT_PASS`.
 - Executar E2E real com sandbox.
 - Testar captura, cancelamento e estorno reais.
 - Configurar logs, monitoramento e retenção.
@@ -34,4 +37,4 @@ Data: 2026-08-30
 
 **Release Candidate tecnicamente preparado — ativação externa ainda não realizada.**
 
-Não é seguro declarar produção-aprovada somente com testes do repositório. A ativação depende das credenciais e da infraestrutura descritas em `PRODUCTION-ACTIVATION.md`.
+A aplicação só deve ser liberada depois que os gates externos forem executados e registrados. O preflight ajuda a detectar configuração incorreta antes do tráfego real, mas não substitui E2E, validação do gateway ou backup/restauração.
