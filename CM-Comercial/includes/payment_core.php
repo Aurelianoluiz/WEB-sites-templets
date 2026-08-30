@@ -42,7 +42,7 @@ function ensure_payment_schema(PDO $pdo): void
 
 function valid_payment_transition(string $from, string $to): bool
 {
-    if ($from === $to) return true;
+    if ($from === $to) return false;
     $allowed = [
         'pending' => ['authorized', 'paid', 'failed', 'cancelled'],
         'authorized' => ['paid', 'failed', 'cancelled'],
@@ -96,7 +96,10 @@ function transition_payment(PDO $pdo, int $paymentId, string $newStatus, ?string
     $stmt = $pdo->prepare('SELECT status, transaction_id FROM payments WHERE id = ?');
     $stmt->execute([$paymentId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row === false || !valid_payment_transition((string)$row['status'], $newStatus)) return false;
+    if ($row === false) return false;
+
+    $currentStatus = (string)$row['status'];
+    if (!valid_payment_transition($currentStatus, $newStatus)) return false;
 
     $currentTransactionId = trim((string)($row['transaction_id'] ?? ''));
     $incomingTransactionId = $transactionId === null ? '' : trim($transactionId);
@@ -108,8 +111,9 @@ function transition_payment(PDO $pdo, int $paymentId, string $newStatus, ?string
         $sql .= ' , transaction_id = ?';
         $params[] = $incomingTransactionId;
     }
-    $sql .= ' WHERE id = ?';
+    $sql .= ' WHERE id = ? AND status = ?';
     $params[] = $paymentId;
+    $params[] = $currentStatus;
     $upd = $pdo->prepare($sql);
     $upd->execute($params);
     return $upd->rowCount() === 1;
@@ -132,5 +136,9 @@ function record_refund_transaction(PDO $pdo, int $paymentId, string $refundTrans
 
     $upd = $pdo->prepare('UPDATE payments SET refund_transaction_id=?, updated_at=? WHERE id=? AND status=\'refunded\' AND (refund_transaction_id IS NULL OR refund_transaction_id=\'\')');
     $upd->execute([$incoming, date('c'), $paymentId]);
-    return $upd->rowCount() === 1;
+    if ($upd->rowCount() === 1) return true;
+
+    $verify = $pdo->prepare('SELECT refund_transaction_id FROM payments WHERE id=? LIMIT 1');
+    $verify->execute([$paymentId]);
+    return trim((string)$verify->fetchColumn()) === $incoming;
 }
