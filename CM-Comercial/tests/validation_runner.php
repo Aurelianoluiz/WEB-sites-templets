@@ -42,6 +42,7 @@ $tests = [
     'payment_status_normalization_runtime_test.php',
     'mercadopago_status_validation_test.php',
     'mercadopago_payment_input_validation_test.php',
+    'checkout_idempotency_scope_test.php',
     'configuration_surface_test.php',
 ];
 
