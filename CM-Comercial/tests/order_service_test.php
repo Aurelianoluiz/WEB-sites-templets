@@ -6,7 +6,6 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use App\Repositories\OrderRepository;
 use App\Repositories\ProductRepository;
 use App\Services\OrderService;
-use PDO;
 
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -27,7 +26,6 @@ $pdo->exec("INSERT INTO orders VALUES (100, 1, 'Cliente Teste', 'cliente@teste.c
 $pdo->exec("INSERT INTO order_items VALUES (1, 100, 10, 5, 20.0)");
 
 $service = new OrderService($pdo, new OrderRepository($pdo), new ProductRepository($pdo));
-
 $result = $service->cancelByCustomer(100, 1);
 if (!$result['success']) {
     fwrite(STDERR, 'FAIL: cancelByCustomer: ' . $result['message'] . PHP_EOL);
