@@ -12,16 +12,24 @@ final class OrderRepository implements OrderRepositoryInterface
     {
     }
 
+    private function appendForUpdate(string $sql, bool $forUpdate): string
+    {
+        if (!$forUpdate || strtolower((string)$this->db->getAttribute(PDO::ATTR_DRIVER_NAME)) !== 'mysql') {
+            return $sql;
+        }
+        return $sql . ' FOR UPDATE';
+    }
+
     public function findById(int $id, bool $forUpdate = false): ?array
     {
         try {
-            $sql = 'SELECT o.*, u.name AS user_name, u.email AS user_email
-                    FROM orders o
-                    LEFT JOIN users u ON u.id = o.user_id
-                    WHERE o.id = ? LIMIT 1';
-            if ($forUpdate) {
-                $sql .= ' FOR UPDATE';
-            }
+            $sql = $this->appendForUpdate(
+                'SELECT o.*, u.name AS user_name, u.email AS user_email
+                 FROM orders o
+                 LEFT JOIN users u ON u.id = o.user_id
+                 WHERE o.id = ? LIMIT 1',
+                $forUpdate
+            );
             $stmt = $this->db->prepare($sql);
             $stmt->execute([$id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -63,13 +71,13 @@ final class OrderRepository implements OrderRepositoryInterface
     public function findByIdAndUser(int $id, int $userId, bool $forUpdate = false): ?array
     {
         try {
-            $sql = 'SELECT o.*, u.name AS user_name, u.email AS user_email
-                    FROM orders o
-                    INNER JOIN users u ON u.id = o.user_id
-                    WHERE o.id = ? AND o.user_id = ? LIMIT 1';
-            if ($forUpdate) {
-                $sql .= ' FOR UPDATE';
-            }
+            $sql = $this->appendForUpdate(
+                'SELECT o.*, u.name AS user_name, u.email AS user_email
+                 FROM orders o
+                 INNER JOIN users u ON u.id = o.user_id
+                 WHERE o.id = ? AND o.user_id = ? LIMIT 1',
+                $forUpdate
+            );
             $stmt = $this->db->prepare($sql);
             $stmt->execute([$id, $userId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -86,9 +94,7 @@ final class OrderRepository implements OrderRepositoryInterface
 
         try {
             $stmt = $this->db->prepare(
-                'SELECT o.* FROM orders o
-                 WHERE o.user_id = ?
-                 ORDER BY o.id DESC LIMIT ? OFFSET ?'
+                'SELECT o.* FROM orders o WHERE o.user_id = ? ORDER BY o.id DESC LIMIT ? OFFSET ?'
             );
             $stmt->bindValue(1, $userId, PDO::PARAM_INT);
             $stmt->bindValue(2, $limit, PDO::PARAM_INT);
@@ -124,7 +130,6 @@ final class OrderRepository implements OrderRepositoryInterface
                 $stmt->execute([$status, $paymentStatus, $id]);
                 return $stmt->rowCount() >= 0;
             }
-
             $stmt = $this->db->prepare('UPDATE orders SET status = ? WHERE id = ?');
             $stmt->execute([$status, $id]);
             return $stmt->rowCount() >= 0;
@@ -138,7 +143,6 @@ final class OrderRepository implements OrderRepositoryInterface
         if ($from === $to) {
             return true;
         }
-
         try {
             $stmt = $this->db->prepare(
                 'INSERT INTO order_status_history (order_id, from_status, to_status, actor_user_id, note)
@@ -177,9 +181,7 @@ final class OrderRepository implements OrderRepositoryInterface
             $params[] = $term;
         }
 
-        $sql = 'SELECT o.*, u.email AS user_email
-                FROM orders o
-                LEFT JOIN users u ON u.id = o.user_id';
+        $sql = 'SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id';
         if ($conditions !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $conditions);
         }
