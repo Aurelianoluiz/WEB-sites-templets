@@ -1,11 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/**
- * Release gate aggregator. It verifies that the full validation asset set
- * exists; environment-dependent checks remain pending until run against
- * a configured deployment.
- */
+/** Release gate asset inventory for deterministic and environment-dependent validation. */
 $required = [
     __DIR__ . '/payment_core_test.php',
     __DIR__ . '/payment_service_test.php',
@@ -45,19 +41,19 @@ $required = [
     __DIR__ . '/mercadopago_payment_input_validation_test.php',
     __DIR__ . '/checkout_idempotency_scope_test.php',
     __DIR__ . '/configuration_surface_test.php',
+    __DIR__ . '/order_service_test.php',
+    __DIR__ . '/admin_order_transition_test.php',
 ];
 
 $missing = array_values(array_filter($required, static fn(string $path): bool => !is_file($path)));
-
 foreach ($required as $path) {
-    $label = basename($path);
-    echo (is_file($path) ? 'READY' : 'MISSING') . ": $label\n";
+    echo (is_file($path) ? 'READY' : 'MISSING') . ': ' . basename($path) . PHP_EOL;
 }
 
 echo "ENVIRONMENT_GATES: pending (database, HTTPS, gateway sandbox, webhook, E2E browser)\n";
-
 if ($missing !== []) {
-    fwrite(STDERR, 'FAIL: missing validation assets: ' . implode(', ', array_map('basename', $missing)) . "\n");
+    fwrite(STDERR, 'FAIL: missing validation assets: ' . implode(', ', array_map('basename', $missing)) . PHP_EOL);
     exit(1);
 }
+
 echo "RELEASE_GATE_ASSETS_READY\n";
