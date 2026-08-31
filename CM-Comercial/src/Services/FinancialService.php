@@ -6,15 +6,16 @@ namespace App\Services;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use InvalidArgumentException;
 use PDO;
+use RuntimeException;
 use Throwable;
 
 /**
  * Application service for customer financial history and administrative
  * reconciliation read models.
  *
- * The service intentionally contains no SQL. Persistence is delegated to the
- * payment repository, while PDO is used only to provide a transaction boundary
- * for compound operations executed by consumers in the same request.
+ * The service contains no SQL. Persistence is delegated to the payment
+ * repository. PDO is used only to provide an explicit ACID transaction
+ * boundary for compound financial operations that require one.
  */
 final class FinancialService
 {
@@ -36,7 +37,7 @@ final class FinancialService
     }
 
     /**
-     * Returns the authenticated customer's financial history.
+     * Returns the customer's paginated financial history.
      *
      * @return list<array<string, mixed>>
      */
@@ -55,7 +56,7 @@ final class FinancialService
                 $offset
             );
         } catch (Throwable $e) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'Unable to load customer financial history.',
                 0,
                 $e
@@ -64,7 +65,7 @@ final class FinancialService
     }
 
     /**
-     * Returns the financial summary used by account_financial.php.
+     * Returns aggregate financial values for the customer dashboard.
      *
      * @return array{count:int,total:float,paid:float,refunded:float,pending:float,failed:float,cancelled:float,authorized:float}
      */
@@ -77,7 +78,7 @@ final class FinancialService
                 'customer_id' => $customerId,
             ]);
         } catch (Throwable $e) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'Unable to calculate customer financial summary.',
                 0,
                 $e
@@ -86,12 +87,12 @@ final class FinancialService
     }
 
     /**
-     * Returns a paginated reconciliation dataset for the admin area.
+     * Returns a paginated administrative reconciliation dataset.
      *
      * Supported filters: status, provider, customer_id, order_id,
      * date_from, date_to and search.
      *
-     * @param array<string, scalar|null> $filters
+     * @param array<string, mixed> $filters
      * @return list<array<string, mixed>>
      */
     public function listReconciliation(
@@ -109,7 +110,7 @@ final class FinancialService
                 $offset
             );
         } catch (Throwable $e) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'Unable to load financial reconciliation records.',
                 0,
                 $e
@@ -118,9 +119,9 @@ final class FinancialService
     }
 
     /**
-     * Returns aggregate values for the reconciliation dashboard/export layer.
+     * Returns aggregate values for an administrative reconciliation view.
      *
-     * @param array<string, scalar|null> $filters
+     * @param array<string, mixed> $filters
      * @return array{count:int,total:float,paid:float,refunded:float,pending:float,failed:float,cancelled:float,authorized:float}
      */
     public function getReconciliationSummary(array $filters = []): array
@@ -130,7 +131,7 @@ final class FinancialService
         try {
             return $this->paymentRepository->summarize($normalized);
         } catch (Throwable $e) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'Unable to calculate reconciliation summary.',
                 0,
                 $e
@@ -139,9 +140,7 @@ final class FinancialService
     }
 
     /**
-     * Returns the financial history together with its aggregate summary.
-     * This is convenient for customer-facing dashboards and avoids duplicated
-     * filter construction in controllers.
+     * Returns customer history and summary in one application-layer response.
      *
      * @return array{
      *     items:list<array<string,mixed>>,
@@ -157,7 +156,6 @@ final class FinancialService
     ): array {
         $this->assertPositiveId($customerId, 'customerId');
         [$limit, $offset] = $this->normalizePagination($limit, $offset);
-
         $filters = ['customer_id' => $customerId];
 
         try {
@@ -168,7 +166,7 @@ final class FinancialService
                 'offset' => $offset,
             ];
         } catch (Throwable $e) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'Unable to load customer financial overview.',
                 0,
                 $e
@@ -177,11 +175,10 @@ final class FinancialService
     }
 
     /**
-     * Executes a caller-provided compound financial operation atomically.
+     * Runs a caller-provided compound financial operation atomically.
      *
-     * No business rules are hidden here; the closure is responsible for using
-     * injected repositories/services and returning its result. Nested
-     * transactions are rejected to prevent ambiguous commit/rollback behavior.
+     * Nested transactions are rejected so callers cannot accidentally create
+     * ambiguous commit/rollback boundaries.
      *
      * @template T
      * @param callable(PDO): T $operation
@@ -190,7 +187,7 @@ final class FinancialService
     public function transaction(callable $operation): mixed
     {
         if ($this->db->inTransaction()) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'Financial transaction cannot start inside an existing PDO transaction.'
             );
         }
@@ -210,8 +207,6 @@ final class FinancialService
     }
 
     /**
-     * Normalizes controller-supplied filters and discards unsupported keys.
-     *
      * @param array<string, mixed> $filters
      * @return array<string, scalar|null>
      */
@@ -259,23 +254,19 @@ final class FinancialService
         if (isset($normalized['date_from']) && !$this->isValidDate((string)$normalized['date_from'])) {
             throw new InvalidArgumentException('Invalid date_from filter. Expected Y-m-d.');
         }
-
         if (isset($normalized['date_to']) && !$this->isValidDate((string)$normalized['date_to'])) {
             throw new InvalidArgumentException('Invalid date_to filter. Expected Y-m-d.');
         }
-
-        if (isset($normalized['date_from'], $normalized['date_to'])) {
-            if ((string)$normalized['date_from'] > (string)$normalized['date_to']) {
-                throw new InvalidArgumentException('date_from cannot be greater than date_to.');
-            }
+        if (isset($normalized['date_from'], $normalized['date_to'])
+            && (string)$normalized['date_from'] > (string)$normalized['date_to']) {
+            throw new InvalidArgumentException('date_from cannot be greater than date_to.');
         }
 
         if (isset($normalized['search'])) {
-            $normalized['search'] = mb_substr((string)$normalized['search'], 0, 120);
+            $normalized['search'] = substr((string)$normalized['search'], 0, 120);
         }
-
         if (isset($normalized['provider'])) {
-            $normalized['provider'] = mb_substr((string)$normalized['provider'], 0, 40);
+            $normalized['provider'] = substr((string)$normalized['provider'], 0, 40);
         }
 
         return $normalized;
@@ -293,10 +284,7 @@ final class FinancialService
             throw new InvalidArgumentException('Pagination offset cannot be negative.');
         }
 
-        return [
-            min($limit, self::MAX_PAGE_SIZE),
-            $offset,
-        ];
+        return [min($limit, self::MAX_PAGE_SIZE), $offset];
     }
 
     private function assertPositiveId(int $id, string $name): void
