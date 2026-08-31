@@ -19,6 +19,7 @@ use App\Services\AdminOrderService;
 use App\Services\FinancialService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
+use App\Services\ReconciliationService;
 
 $container = new Container();
 $container->singleton(Database::class, static fn (): Database => Database::getInstance());
@@ -51,6 +52,11 @@ $container->singleton(AdminOrderService::class, static fn (Container $c): AdminO
 $container->singleton(FinancialService::class, static fn (Container $c): FinancialService => new FinancialService(
     $c->get(PDO::class),
     $c->get(PaymentTransactionRepositoryInterface::class)
+));
+$container->singleton(ReconciliationService::class, static fn (Container $c): ReconciliationService => new ReconciliationService(
+    $c->get(PDO::class),
+    $c->get(PaymentTransactionRepositoryInterface::class),
+    $c->get(OrderRepositoryInterface::class)
 ));
 $container->singleton(PaymentService::class, static fn (Container $c): PaymentService => new PaymentService(
     $c->get(Database::class),
