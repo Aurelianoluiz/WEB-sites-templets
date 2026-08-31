@@ -6,6 +6,7 @@ $financial = $read(__DIR__ . '/../financial_history.php');
 $customer = $read(__DIR__ . '/../customer_financial_history.php');
 $reconciliation = $read(__DIR__ . '/../admin/reconciliation.php');
 $reconciliationView = $read(__DIR__ . '/../admin/views/reconciliation.php');
+$reconciliationService = $read(__DIR__ . '/../src/Services/ReconciliationService.php');
 $paymentsController = $read(__DIR__ . '/../admin/payments.php');
 $paymentsView = $read(__DIR__ . '/../admin/views/payments.php');
 $csrf = $read(__DIR__ . '/../includes/csrf.php');
@@ -26,11 +27,15 @@ $checks = [
     'customer_does_not_use_request_identity' => !str_contains($customer, '$_GET[\'customer_id\']') && !str_contains($customer, '$_POST[\'customer_id\']'),
     'prepared_statement_repository' => (bool)preg_match($pdoCallPattern, $repository),
     'financial_service_no_inline_sql' => !preg_match($sqlKeywordPattern, $service),
+    'reconciliation_service_present' => $reconciliationService !== '',
+    'reconciliation_service_namespace' => str_contains($reconciliationService, 'namespace App\\Services;'),
+    'reconciliation_service_no_sql' => !preg_match($sqlKeywordPattern, $reconciliationService),
+    'reconciliation_service_repository_injection' => str_contains($reconciliationService, 'PaymentTransactionRepositoryInterface') && str_contains($reconciliationService, 'OrderRepositoryInterface'),
     'bounded_pagination' => str_contains($service, 'MAX_PAGE_SIZE') && str_contains($repository, 'min(100'),
     'reconciliation_controller_present' => $reconciliation !== '',
     'reconciliation_view_present' => $reconciliationView !== '',
     'reconciliation_admin_guard' => str_contains($reconciliation, 'require_admin();'),
-    'reconciliation_resolves_service' => str_contains($reconciliation, '$container->get(FinancialService::class)'),
+    'reconciliation_resolves_service' => str_contains($reconciliation, '$container->get(ReconciliationService::class)'),
     'reconciliation_no_sql' => !preg_match($sqlKeywordPattern, $reconciliation),
     'reconciliation_no_pdo_calls' => !preg_match($pdoCallPattern, $reconciliation),
     'reconciliation_pagination_limit' => str_contains($reconciliation, 'RECONCILIATION_LIMIT_MAX = 100') && str_contains($reconciliation, 'max(1'),
