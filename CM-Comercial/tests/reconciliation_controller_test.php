@@ -4,7 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use App\Repositories\PaymentTransactionRepository;
-use App\Services\FinancialService;
+use App\Repositories\OrderRepository;
+use App\Services\ReconciliationService;
 
 function assert_true(bool $condition, string $message): void
 {
@@ -31,8 +32,8 @@ $view = (string)file_get_contents($viewPath);
 
 assert_true(str_contains($controller, 'require_admin();'), 'Admin guard is missing.');
 assert_true(
-    str_contains($controller, '$container->get(FinancialService::class)'),
-    'FinancialService must be resolved through the Container.'
+    str_contains($controller, '$container->get(ReconciliationService::class)'),
+    'ReconciliationService must be resolved through the Container.'
 );
 assert_true(
     !preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller),
@@ -61,12 +62,16 @@ assert_true(str_contains($view, 'order_id'), 'Order filter is missing.');
 assert_true(str_contains($view, 'provider'), 'Provider filter is missing.');
 assert_true(str_contains($view, 'page'), 'Pagination controls are missing.');
 
-// Exercise the real FinancialService with an isolated SQLite fixture.
 $pdo = new \PDO('sqlite::memory:');
 $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
 
 $pdo->exec(<<<'SQL'
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL
+);
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NULL,
@@ -74,7 +79,8 @@ CREATE TABLE orders (
     email TEXT NOT NULL,
     status TEXT NOT NULL,
     payment_status TEXT NOT NULL,
-    total REAL NOT NULL
+    total REAL NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE payments (
     id INTEGER PRIMARY KEY,
@@ -89,17 +95,21 @@ CREATE TABLE payments (
 );
 SQL);
 
-$pdo->exec("INSERT INTO orders VALUES (1, 10, 'Cliente =Ataque', 'cliente@example.test', 'confirmed', 'paid', 100.00)");
-$pdo->exec("INSERT INTO orders VALUES (2, 20, 'Cliente Dois', 'dois@example.test', 'confirmed', 'pending', 200.00)");
+$pdo->exec("INSERT INTO users VALUES (10, 'Cliente A', 'cliente@example.test')");
+$pdo->exec("INSERT INTO orders VALUES (1, 10, 'Cliente A', 'cliente@example.test', 'confirmed', 'paid', 100.00, '2026-08-20 10:00:00')");
+$pdo->exec("INSERT INTO orders VALUES (2, 20, 'Cliente Dois', 'dois@example.test', 'confirmed', 'pending', 200.00, '2026-08-21 10:00:00')");
 $pdo->exec("INSERT INTO payments VALUES (1, 1, 100.00, 'pix', 'paid', 'mp-1', 'mercadopago', '2026-08-20 10:00:00', '2026-08-20 10:01:00')");
-$pdo->exec("INSERT INTO payments VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'mercadopago', '2026-08-21 10:00:00', '2026-08-21 10:01:00')");
+$pdo->exec("INSERT INTO payments VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'mercadopago', '2026-08-21 10:00:00', '2026-08-21 10:01:00')
 
-$service = new FinancialService(
+");
+
+$service = new ReconciliationService(
     $pdo,
-    new PaymentTransactionRepository($pdo)
+    new PaymentTransactionRepository($pdo),
+    new OrderRepository($pdo)
 );
 
-$filtered = $service->listReconciliation(
+$filtered = $service->getPage(
     [
         'customer_id' => 10,
         'date_from' => '2026-08-20',
@@ -111,19 +121,17 @@ $filtered = $service->listReconciliation(
     0
 );
 
-assert_same(1, count($filtered), 'FinancialService filter flow is incorrect.');
-assert_same(1, (int)$filtered[0]['id'], 'Filtered transaction id is incorrect.');
+assert_same(1, count($filtered['items']), 'ReconciliationService filter flow is incorrect.');
+assert_same(1, (int)$filtered['items'][0]['id'], 'Filtered transaction id is incorrect.');
 
-$nextPage = $service->listReconciliation([], 1, 1);
-assert_same(1, count($nextPage), 'FinancialService pagination did not return the requested page.');
-assert_same(1, (int)$nextPage[0]['id'], 'FinancialService pagination ordering is incorrect.');
+$nextPage = $service->getPage([], 1, 1);
+assert_same(1, count($nextPage['items']), 'ReconciliationService pagination did not return the requested page.');
+assert_same(2, (int)$nextPage['items'][0]['id'], 'ReconciliationService pagination ordering is incorrect.');
 
-$summary = $service->getReconciliationSummary(['provider' => 'mercadopago']);
-assert_same(2, $summary['count'], 'Reconciliation summary count is incorrect.');
-assert_same(300.00, $summary['total'], 'Reconciliation summary total is incorrect.');
+$summary = $service->getSummary(['provider' => 'mercadopago']);
+assert_same(2, $summary['total'], 'Reconciliation summary count is incorrect.');
+assert_same(300.00, $summary['total_amount'], 'Reconciliation summary total is incorrect.');
 
-// Validate the controller's CSV projection is allow-listed: no sensitive fields
-// are written to its fputcsv rows.
 $forbiddenCsvFields = [
     'payload',
     'raw_payload',
@@ -140,7 +148,6 @@ foreach ($forbiddenCsvFields as $field) {
     );
 }
 
-// Verify the CSV injection mitigation contract against representative hostile values.
 $csvSafe = static function (mixed $value): string {
     $text = is_scalar($value) || $value === null ? (string)$value : '';
     if ($text !== '' && in_array($text[0], ['=', '+', '-', '@'], true)) {
@@ -155,14 +162,13 @@ assert_same("'-10", $csvSafe('-10'), 'CSV minus prefix must be escaped.');
 assert_same("'@SUM", $csvSafe('@SUM'), 'CSV at prefix must be escaped.');
 assert_same('Cliente normal', $csvSafe('Cliente normal'), 'Normal CSV values must remain unchanged.');
 
-// Authorization contract: controller must call the central admin guard before the service.
 $guardPos = strpos($controller, 'require_admin();');
-$servicePos = strpos($controller, '$financialService = $container->get(FinancialService::class);');
+$servicePos = strpos($controller, '$reconciliationService = $container->get(ReconciliationService::class);');
 assert_true(
     $guardPos !== false
     && $servicePos !== false
     && $guardPos < $servicePos,
-    'Admin guard must run before FinancialService access.'
+    'Admin guard must run before ReconciliationService access.'
 );
 
 echo "PASS: reconciliation_controller_test\n";
