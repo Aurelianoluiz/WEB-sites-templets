@@ -7,5 +7,6 @@
 /data/*.log
 /uploads/*
 !/uploads/.gitkeep
+/vendor/
 .DS_Store
 Thumbs.db
