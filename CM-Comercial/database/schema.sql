@@ -89,7 +89,6 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
     CONSTRAINT chk_payment_amount CHECK (amount > 0)
 ) ENGINE=InnoDB;
 
--- Optional generic audit trail for financial lifecycle changes.
 CREATE TABLE IF NOT EXISTS payment_audit_log (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     payment_transaction_id BIGINT UNSIGNED NOT NULL,
@@ -104,9 +103,38 @@ CREATE TABLE IF NOT EXISTS payment_audit_log (
     CONSTRAINT fk_payment_audit_payment FOREIGN KEY (payment_transaction_id) REFERENCES payment_transactions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Stock reservation operation example:
+CREATE TABLE IF NOT EXISTS order_status_history (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    order_id BIGINT UNSIGNED NOT NULL,
+    from_status VARCHAR(30) NOT NULL,
+    to_status VARCHAR(30) NOT NULL,
+    actor_user_id BIGINT UNSIGNED NULL,
+    note VARCHAR(500) NOT NULL DEFAULT '',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    KEY idx_order_status_history_order (order_id, created_at),
+    KEY idx_order_status_history_actor (actor_user_id, created_at),
+    CONSTRAINT fk_order_status_history_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    product_id BIGINT UNSIGNED NOT NULL,
+    type ENUM('in','out','adjustment') NOT NULL,
+    qty INT UNSIGNED NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    user_id BIGINT UNSIGNED NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    KEY idx_stock_movements_product_created (product_id, created_at),
+    KEY idx_stock_movements_user_created (user_id, created_at),
+    CONSTRAINT fk_stock_movements_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_stock_movements_qty CHECK (qty > 0)
+) ENGINE=InnoDB;
+
+-- Stock reservation example:
 -- START TRANSACTION;
 -- SELECT id, stock_quantity, price, sku, name FROM products WHERE id IN (...) ORDER BY id FOR UPDATE;
--- Validate stock quantities, then UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?;
+-- Validate stock quantities, then update stock atomically.
 -- INSERT order + order_items + payment_transactions;
 -- COMMIT;
