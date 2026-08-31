@@ -16,10 +16,4 @@ interface PaymentTransactionRepositoryInterface
      * @return array<string, int|float>
      */
     public function summarize(array $filters = []): array;
-
-    /**
-     * @param array<string, scalar|null> $filters
-     * @return array<string, int|float>
-     */
-    public function summarizeForReconciliation(array $filters = []): array;
 }
