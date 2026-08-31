@@ -5,11 +5,8 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 use App\Repositories\PaymentTransactionRepository;
 use App\Services\FinancialService;
-use PDO;
-use RuntimeException;
-use Throwable;
 
-final class FinancialServiceTestFailure extends RuntimeException
+final class FinancialServiceTestFailure extends \RuntimeException
 {
 }
 
@@ -34,16 +31,16 @@ function assert_throws(callable $callback, string $message): void
 {
     try {
         $callback();
-    } catch (Throwable) {
+    } catch (\Throwable) {
         return;
     }
 
     throw new FinancialServiceTestFailure($message);
 }
 
-$pdo = new PDO('sqlite::memory:');
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+$pdo = new \PDO('sqlite::memory:');
+$pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+$pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
 
 $pdo->exec(<<<'SQL'
 CREATE TABLE users (
@@ -144,10 +141,8 @@ $pageOne = $service->getCustomerFinancialHistory(1, 2, 0);
 $pageTwo = $service->getCustomerFinancialHistory(1, 2, 2);
 assert_same(2, count($pageOne), 'First pagination page size is incorrect.');
 assert_same(2, count($pageTwo), 'Second pagination page size is incorrect.');
-assert_true(
-    (int)$pageOne[0]['id'] !== (int)$pageTwo[0]['id'],
-    'Pagination pages overlap.'
-);
+assert_true((int)$pageOne[0]['id'] !== (int)$pageTwo[0]['id'], 'Pagination pages overlap.');
+
 assert_throws(
     static fn (): array => $service->getCustomerFinancialHistory(1, 0, 0),
     'Zero pagination limit must be rejected.'
@@ -169,7 +164,7 @@ assert_throws(
 );
 
 $committedResult = $service->transaction(
-    static function (PDO $db): string {
+    static function (\PDO $db): string {
         $stmt = $db->prepare('INSERT INTO transaction_probe (value) VALUES (?)');
         $stmt->execute(['committed']);
         return 'committed';
@@ -185,10 +180,10 @@ assert_same(
 assert_throws(
     static function () use ($service): void {
         $service->transaction(
-            static function (PDO $db): never {
+            static function (\PDO $db): never {
                 $stmt = $db->prepare('INSERT INTO transaction_probe (value) VALUES (?)');
                 $stmt->execute(['rolled-back']);
-                throw new RuntimeException('forced rollback');
+                throw new \RuntimeException('forced rollback');
             }
         );
     },
@@ -203,7 +198,7 @@ assert_same(
 $pdo->beginTransaction();
 try {
     assert_throws(
-        static fn (): mixed => $service->transaction(static fn (PDO $db): string => 'nested'),
+        static fn (): mixed => $service->transaction(static fn (\PDO $db): string => 'nested'),
         'Nested transactions must be rejected.'
     );
 } finally {
