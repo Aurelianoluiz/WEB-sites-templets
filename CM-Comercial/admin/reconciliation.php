@@ -5,7 +5,6 @@ require_once __DIR__ . '/../config.php';
 $container = require __DIR__ . '/../bootstrap.php';
 
 use App\Services\ReconciliationService;
-use Throwable;
 
 require_admin();
 
@@ -65,7 +64,7 @@ try {
     $payments = $result['items'];
     $page = $result['page'];
     $offset = $result['offset'];
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     http_response_code(400);
     $error = $e->getMessage();
 }
@@ -85,7 +84,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
 
         $output = fopen('php://output', 'wb');
         if ($output === false) {
-            throw new RuntimeException('Unable to open CSV output stream.');
+            throw new \RuntimeException('Unable to open CSV output stream.');
         }
 
         $csvSafe = static function (mixed $value): string {
@@ -128,7 +127,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
 
         fclose($output);
         exit;
-    } catch (Throwable $e) {
+    } catch (\Throwable $e) {
         http_response_code(500);
         $error = 'Unable to export reconciliation data.';
     }
