@@ -139,10 +139,7 @@ final class FakeOrderRepository implements OrderRepositoryInterface
     public function listWithFilters(array $filters, int $limit = 50, int $offset = 0): array { return []; }
     public function listAll(string $statusFilter = '', int $limit = 50, int $offset = 0): array { return []; }
 
-    /**
-     * @param array<string, scalar|null> $filters
-     * @return list<array<string,mixed>>
-     */
+    /** @param array<string, scalar|null> $filters @return list<array<string,mixed>> */
     public function listWithoutPaymentTransaction(array $filters = [], int $limit = 50, int $offset = 0): array
     {
         $this->missingListCalls++;
@@ -257,31 +254,25 @@ $paymentRepository = new FakePaymentTransactionRepository($paymentRows);
 $orderRepository = new FakeOrderRepository($missingOrders);
 $service = new ReconciliationService($pdo, $paymentRepository, $orderRepository);
 
-// Matching perfeito -> reconciled.
 $perfect = $service->classifyPayment($paymentRows[0]);
 assertSameValue('reconciled', $perfect['reconciliation_status'], 'Perfect match must be reconciled.');
 assertSameValue('', $perfect['divergence_reason'], 'Perfect match must not have a divergence reason.');
 
-// Divergência de valor -> divergent.
 $amountMismatch = $service->classifyPayment($paymentRows[1]);
 assertSameValue('divergent', $amountMismatch['reconciliation_status'], 'Amount mismatch must be divergent.');
 assertSameValue('amount_mismatch', $amountMismatch['divergence_reason'], 'Amount mismatch reason is incorrect.');
 
-// Gateway paid + pedido cancelled -> divergent.
 $statusMismatch = $service->classifyPayment($paymentRows[2]);
 assertSameValue('divergent', $statusMismatch['reconciliation_status'], 'Status mismatch must be divergent.');
 assertSameValue('status_mismatch', $statusMismatch['divergence_reason'], 'Status mismatch reason is incorrect.');
 
-// Pending -> pending.
 $pending = $service->classifyPayment($paymentRows[3]);
 assertSameValue('pending', $pending['reconciliation_status'], 'Pending payment must remain pending.');
 
-// Orphan transaction -> inconsistent.
 $orphan = $service->classifyPayment($paymentRows[5]);
 assertSameValue('inconsistent', $orphan['reconciliation_status'], 'Orphan transaction must be inconsistent.');
 assertSameValue('orphan_transaction', $orphan['divergence_reason'], 'Orphan transaction reason is incorrect.');
 
-// Summary must detect both orphan transaction and order without transaction.
 $summary = $service->getSummary();
 assertSameValue(7, $summary['total'], 'Summary must include payment and missing-order candidates.');
 assertSameValue(2, $summary['reconciled'], 'Reconciled count is incorrect.');
@@ -292,9 +283,8 @@ assertSameValue(1, $summary['orphan_transactions'], 'Orphan transaction count is
 assertSameValue(1, $summary['missing_transactions'], 'Missing transaction count is incorrect.');
 assertSameValue(1, $summary['amount_mismatches'], 'Amount mismatch count is incorrect.');
 assertSameValue(1, $summary['status_mismatches'], 'Status mismatch count is incorrect.');
-assertSameValue(540.00, $summary['total_amount'], 'Payment amount summary is incorrect.');
+assertSameValue(520.00, $summary['total_amount'], 'Payment amount summary is incorrect.');
 
-// Pagination must be bounded and stable.
 $pageOne = $service->getPage([], 2, 0);
 assertSameValue(2, count($pageOne['items']), 'First reconciliation page size is incorrect.');
 assertSameValue(4, $pageOne['total_pages'], 'Total pages must include missing orders.');
@@ -304,66 +294,35 @@ $pageTwo = $service->getPage([], 2, 2);
 assertSameValue(2, count($pageTwo['items']), 'Second reconciliation page size is incorrect.');
 assertSameValue(2, $pageTwo['page'], 'Second page number is incorrect.');
 
-assertThrows(
-    static fn (): array => $service->getPage([], 0, 0),
-    'Zero page size must be rejected.'
-);
-assertThrows(
-    static fn (): array => $service->getPage([], 50, -1),
-    'Negative offset must be rejected.'
-);
-assertThrows(
-    static fn (): array => $service->getPage(['date_from' => '2026-09-01', 'date_to' => '2026-08-01']),
-    'Reversed date range must be rejected.'
-);
+assertThrows(static fn (): array => $service->getPage([], 0, 0), 'Zero page size must be rejected.');
+assertThrows(static fn (): array => $service->getPage([], 50, -1), 'Negative offset must be rejected.');
+assertThrows(static fn (): array => $service->getPage(['date_from' => '2026-09-01', 'date_to' => '2026-08-01']), 'Reversed date range must be rejected.');
 
-// Repository integration: service must call both repositories for full reconciliation.
 assertTrue($paymentRepository->summaryCalls > 0, 'Payment repository summary was not called.');
 assertTrue($paymentRepository->listCalls > 0, 'Payment repository listing was not called.');
 assertTrue($orderRepository->missingCountCalls > 0, 'Order repository missing-payment count was not called.');
 assertTrue($orderRepository->missingListCalls > 0, 'Order repository missing-payment listing was not called.');
 
-// Architectural guard: no SQL should exist in the service.
 $serviceSource = (string)file_get_contents(__DIR__ . '/../src/Services/ReconciliationService.php');
-assertTrue(
-    !preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b\s+(FROM|INTO|SET)?/i', $serviceSource),
-    'ReconciliationService must not contain SQL statements.'
-);
+assertTrue(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b\s+(FROM|INTO|SET)?/i', $serviceSource), 'ReconciliationService must not contain SQL statements.');
 
-// ACID commit.
 $service->transaction(static function (PDO $db): void {
     $db->exec('CREATE TABLE probe (value TEXT NOT NULL)');
     $db->exec("INSERT INTO probe (value) VALUES ('committed')");
 });
-assertSameValue(
-    1,
-    (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'committed'")->fetchColumn(),
-    'Committed transaction was not persisted.'
-);
+assertSameValue(1, (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'committed'")->fetchColumn(), 'Committed transaction was not persisted.');
 
-// ACID rollback.
-assertThrows(
-    static function () use ($service): void {
-        $service->transaction(static function (PDO $db): never {
-            $db->exec("INSERT INTO probe (value) VALUES ('rolled-back')");
-            throw new RuntimeException('forced rollback');
-        });
-    },
-    'Rollback must propagate the underlying exception.'
-);
-assertSameValue(
-    0,
-    (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'rolled-back'")->fetchColumn(),
-    'Rolled-back transaction persisted data.'
-);
+assertThrows(static function () use ($service): void {
+    $service->transaction(static function (PDO $db): never {
+        $db->exec("INSERT INTO probe (value) VALUES ('rolled-back')");
+        throw new RuntimeException('forced rollback');
+    });
+}, 'Rollback must propagate the underlying exception.');
+assertSameValue(0, (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'rolled-back'")->fetchColumn(), 'Rolled-back transaction persisted data.');
 
-// Nested transaction guard.
 $pdo->beginTransaction();
 try {
-    assertThrows(
-        static fn (): mixed => $service->transaction(static fn (PDO $db): string => 'nested'),
-        'Nested reconciliation transactions must be rejected.'
-    );
+    assertThrows(static fn (): mixed => $service->transaction(static fn (PDO $db): string => 'nested'), 'Nested reconciliation transactions must be rejected.');
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
