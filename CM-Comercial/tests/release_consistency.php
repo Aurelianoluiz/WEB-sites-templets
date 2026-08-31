@@ -25,15 +25,18 @@ $expected = [
 
 $failed = [];
 foreach ($expected as $file) {
+    $gateEntry = "'/" . $file . "'";
+    $gateEntryAlternative = "'" . $file . "'";
     if (!is_file($root . '/' . $file)) {
         $failed[] = 'missing:' . $file;
     }
-    if (!str_contains($gate, "'" . __DIR__ . '/' . $file . "'")) {
+    if (!str_contains($gate, "'" . $file . "'")) {
         $failed[] = 'gate:' . $file;
     }
-    if (!str_contains($runner, "'" . $file . "'")) {
+    if (!str_contains($runner, $gateEntryAlternative)) {
         $failed[] = 'runner:' . $file;
     }
+    unset($gateEntry);
 }
 
 if (!str_contains($gate, 'ENVIRONMENT_GATES')) {
