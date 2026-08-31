@@ -6,21 +6,17 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use App\Repositories\PaymentTransactionRepository;
 use App\Services\FinancialService;
 
-final class ReconciliationControllerTestFailure extends \RuntimeException
-{
-}
-
 function assert_true(bool $condition, string $message): void
 {
     if (!$condition) {
-        throw new ReconciliationControllerTestFailure($message);
+        throw new \RuntimeException($message);
     }
 }
 
 function assert_same(mixed $expected, mixed $actual, string $message): void
 {
     if ($expected !== $actual) {
-        throw new ReconciliationControllerTestFailure(
+        throw new \RuntimeException(
             $message
             . ' expected=' . var_export($expected, true)
             . ' actual=' . var_export($actual, true)
@@ -38,14 +34,20 @@ assert_true(
     str_contains($controller, '$container->get(FinancialService::class)'),
     'FinancialService must be resolved through the Container.'
 );
-assert_true(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller), 'Controller must not contain SQL keywords.');
+assert_true(
+    !preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller),
+    'Controller must not contain SQL keywords.'
+);
 assert_true(!str_contains($controller, '->prepare('), 'Controller must not prepare SQL statements.');
 assert_true(!str_contains($controller, '->query('), 'Controller must not query the database directly.');
 assert_true(!str_contains($controller, '->exec('), 'Controller must not execute database statements directly.');
-assert_true(str_contains($controller, "header('Content-Type: text/csv; charset=UTF-8');"), 'CSV content type header is missing.');
+assert_true(
+    str_contains($controller, "header('Content-Type: text/csv; charset=UTF-8');"),
+    'CSV content type header is missing.'
+);
 assert_true(str_contains($controller, 'Content-Disposition'), 'CSV content disposition header is missing.');
 assert_true(str_contains($controller, "['=', '+', '-', '@']"), 'CSV injection guard is missing.');
-assert_true(str_contains($controller, 'paymentRepository') === false, 'Controller must not resolve repositories directly.');
+assert_true(!str_contains($controller, 'paymentRepository'), 'Controller must not resolve repositories directly.');
 assert_true(!str_contains($controller, 'payload'), 'Controller must not expose raw payload fields.');
 assert_true(!str_contains($controller, 'access_token'), 'Controller must not expose access tokens.');
 assert_true(!str_contains($controller, 'webhook_secret'), 'Controller must not expose webhook secrets.');
@@ -69,7 +71,10 @@ CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NULL,
     customer_name TEXT NOT NULL,
-    email TEXT NOT NULL
+    email TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payment_status TEXT NOT NULL,
+    total REAL NOT NULL
 );
 CREATE TABLE payments (
     id INTEGER PRIMARY KEY,
@@ -84,8 +89,8 @@ CREATE TABLE payments (
 );
 SQL);
 
-$pdo->exec("INSERT INTO orders VALUES (1, 10, 'Cliente =Ataque', 'cliente@example.test')");
-$pdo->exec("INSERT INTO orders VALUES (2, 20, 'Cliente Dois', 'dois@example.test')");
+$pdo->exec("INSERT INTO orders VALUES (1, 10, 'Cliente =Ataque', 'cliente@example.test', 'confirmed', 'paid', 100.00)");
+$pdo->exec("INSERT INTO orders VALUES (2, 20, 'Cliente Dois', 'dois@example.test', 'confirmed', 'pending', 200.00)");
 $pdo->exec("INSERT INTO payments VALUES (1, 1, 100.00, 'pix', 'paid', 'mp-1', 'mercadopago', '2026-08-20 10:00:00', '2026-08-20 10:01:00')");
 $pdo->exec("INSERT INTO payments VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'mercadopago', '2026-08-21 10:00:00', '2026-08-21 10:01:00')");
 
@@ -153,6 +158,11 @@ assert_same('Cliente normal', $csvSafe('Cliente normal'), 'Normal CSV values mus
 // Authorization contract: controller must call the central admin guard before the service.
 $guardPos = strpos($controller, 'require_admin();');
 $servicePos = strpos($controller, '$financialService = $container->get(FinancialService::class);');
-assert_true($guardPos !== false && $servicePos !== false && $guardPos < $servicePos, 'Admin guard must run before FinancialService access.');
+assert_true(
+    $guardPos !== false
+    && $servicePos !== false
+    && $guardPos < $servicePos,
+    'Admin guard must run before FinancialService access.'
+);
 
 echo "PASS: reconciliation_controller_test\n";
