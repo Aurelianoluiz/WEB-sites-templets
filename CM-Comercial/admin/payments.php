@@ -5,7 +5,6 @@ require_once __DIR__ . '/../config.php';
 $container = require __DIR__ . '/../bootstrap.php';
 
 use App\Services\FinancialService;
-use Throwable;
 
 require_admin();
 
@@ -81,7 +80,7 @@ try {
         $limit,
         $offset
     );
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     http_response_code(400);
     $error = $e->getMessage();
     $total = 0;
