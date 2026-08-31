@@ -43,6 +43,7 @@ $tests = [
     'configuration_surface_test.php',
     'order_service_test.php',
     'admin_order_transition_test.php',
+    'financial_service_test.php',
 ];
 
 $php = PHP_BINARY;
