@@ -44,6 +44,7 @@ $tests = [
     'order_service_test.php',
     'admin_order_transition_test.php',
     'financial_service_test.php',
+    'reconciliation_controller_test.php',
 ];
 
 $php = PHP_BINARY;
