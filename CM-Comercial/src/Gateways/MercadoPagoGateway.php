@@ -6,7 +6,7 @@ namespace App\Gateways;
 use InvalidArgumentException;
 use RuntimeException;
 
-final class MercadoPagoGateway
+final class MercadoPagoGateway implements PaymentGatewayInterface
 {
     private const API_BASE = 'https://api.mercadopago.com/v1';
     private readonly string $accessToken;
@@ -14,9 +14,7 @@ final class MercadoPagoGateway
     public function __construct(string $accessToken = '')
     {
         $token = $accessToken !== '' ? $accessToken : trim((string)(getenv('MP_ACCESS_TOKEN') ?: ''));
-        if ($token === '') {
-            throw new RuntimeException('MP_ACCESS_TOKEN is not configured.');
-        }
+        if ($token === '') throw new RuntimeException('MP_ACCESS_TOKEN is not configured.');
         $this->accessToken = $token;
     }
 
@@ -43,7 +41,6 @@ final class MercadoPagoGateway
         $transactionId = (string)($response['id'] ?? '');
         if ($transactionId === '') throw new RuntimeException('Mercado Pago did not return a payment id.');
         $td = (array)($response['point_of_interaction']['transaction_data'] ?? []);
-
         return [
             'provider_payment_id' => $transactionId,
             'status' => $this->normalizeStatus((string)($response['status'] ?? 'pending')),
