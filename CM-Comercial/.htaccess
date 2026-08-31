@@ -11,17 +11,7 @@ Options -Indexes
     Require all denied
 </FilesMatch>
 
-<IfModule mod_authz_core.c>
-    <Directory "data">
-        Require all denied
-    </Directory>
-    <Directory "src">
-        Require all denied
-    </Directory>
-    <Directory "config">
-        Require all denied
-    </Directory>
-    <Directory "database">
-        Require all denied
-    </Directory>
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?:src|config|database)(?:/|$) - [F,L]
 </IfModule>
