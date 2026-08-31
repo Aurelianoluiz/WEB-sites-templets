@@ -1,10 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/**
- * Runs deterministic, environment-independent validation scripts in isolation.
- * Environment-dependent E2E/gateway checks are intentionally excluded.
- */
+/** Runs deterministic, environment-independent validation scripts in isolation. */
 $tests = [
     'payment_core_test.php',
     'payment_service_test.php',
@@ -44,11 +41,12 @@ $tests = [
     'mercadopago_payment_input_validation_test.php',
     'checkout_idempotency_scope_test.php',
     'configuration_surface_test.php',
+    'order_service_test.php',
+    'admin_order_transition_test.php',
 ];
 
 $php = PHP_BINARY;
 $failed = [];
-
 foreach ($tests as $test) {
     $path = __DIR__ . '/' . $test;
     if (!is_file($path)) {
@@ -56,17 +54,16 @@ foreach ($tests as $test) {
         $failed[] = $test;
         continue;
     }
-
     $command = escapeshellarg($php) . ' ' . escapeshellarg($path) . ' 2>&1';
     $output = [];
     $exitCode = 0;
     exec($command, $output, $exitCode);
-
     echo "=== $test ===\n";
     echo implode("\n", $output) . "\n";
     echo ($exitCode === 0 ? "RESULT: PASS\n" : "RESULT: FAIL ($exitCode)\n");
-
-    if ($exitCode !== 0) $failed[] = $test;
+    if ($exitCode !== 0) {
+        $failed[] = $test;
+    }
 }
 
 if ($failed !== []) {
