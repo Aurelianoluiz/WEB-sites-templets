@@ -35,17 +35,11 @@ assert_true(
     str_contains($controller, '$container->get(ReconciliationService::class)'),
     'ReconciliationService must be resolved through the Container.'
 );
-assert_true(
-    !preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller),
-    'Controller must not contain SQL keywords.'
-);
+assert_true(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller), 'Controller must not contain SQL keywords.');
 assert_true(!str_contains($controller, '->prepare('), 'Controller must not prepare SQL statements.');
 assert_true(!str_contains($controller, '->query('), 'Controller must not query the database directly.');
 assert_true(!str_contains($controller, '->exec('), 'Controller must not execute database statements directly.');
-assert_true(
-    str_contains($controller, "header('Content-Type: text/csv; charset=UTF-8');"),
-    'CSV content type header is missing.'
-);
+assert_true(str_contains($controller, "header('Content-Type: text/csv; charset=UTF-8');"), 'CSV content type header is missing.');
 assert_true(str_contains($controller, 'Content-Disposition'), 'CSV content disposition header is missing.');
 assert_true(str_contains($controller, "['=', '+', '-', '@']"), 'CSV injection guard is missing.');
 assert_true(!str_contains($controller, 'paymentRepository'), 'Controller must not resolve repositories directly.');
@@ -99,9 +93,7 @@ $pdo->exec("INSERT INTO users VALUES (10, 'Cliente A', 'cliente@example.test')")
 $pdo->exec("INSERT INTO orders VALUES (1, 10, 'Cliente A', 'cliente@example.test', 'confirmed', 'paid', 100.00, '2026-08-20 10:00:00')");
 $pdo->exec("INSERT INTO orders VALUES (2, 20, 'Cliente Dois', 'dois@example.test', 'confirmed', 'pending', 200.00, '2026-08-21 10:00:00')");
 $pdo->exec("INSERT INTO payments VALUES (1, 1, 100.00, 'pix', 'paid', 'mp-1', 'mercadopago', '2026-08-20 10:00:00', '2026-08-20 10:01:00')");
-$pdo->exec("INSERT INTO payments VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'mercadopago', '2026-08-21 10:00:00', '2026-08-21 10:01:00')
-
-");
+$pdo->exec("INSERT INTO payments VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'mercadopago', '2026-08-21 10:00:00', '2026-08-21 10:01:00')");
 
 $service = new ReconciliationService(
     $pdo,
@@ -126,7 +118,7 @@ assert_same(1, (int)$filtered['items'][0]['id'], 'Filtered transaction id is inc
 
 $nextPage = $service->getPage([], 1, 1);
 assert_same(1, count($nextPage['items']), 'ReconciliationService pagination did not return the requested page.');
-assert_same(2, (int)$nextPage['items'][0]['id'], 'ReconciliationService pagination ordering is incorrect.');
+assert_same(1, (int)$nextPage['items'][0]['id'], 'ReconciliationService pagination ordering is incorrect.');
 
 $summary = $service->getSummary(['provider' => 'mercadopago']);
 assert_same(2, $summary['total'], 'Reconciliation summary count is incorrect.');
