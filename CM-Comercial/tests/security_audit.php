@@ -4,6 +4,8 @@ declare(strict_types=1);
 $read = static fn(string $path): string => is_file($path) ? (string)file_get_contents($path) : '';
 $financial = $read(__DIR__ . '/../financial_history.php');
 $customer = $read(__DIR__ . '/../customer_financial_history.php');
+$reconciliation = $read(__DIR__ . '/../admin/reconciliation.php');
+$reconciliationView = $read(__DIR__ . '/../admin/views/reconciliation.php');
 $csrf = $read(__DIR__ . '/../includes/csrf.php');
 $checkout = $read(__DIR__ . '/../includes/checkout_payment.php');
 $config = $read(__DIR__ . '/../config.php');
@@ -13,13 +15,28 @@ $service = $read(__DIR__ . '/../src/Services/FinancialService.php');
 
 $literalUserId = '$_SESSION[\'user\'][\'id\']';
 $logoutPostGuard = 'if ($_SERVER[\'REQUEST_METHOD\'] === \'POST\')';
+$controllerSql = preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $reconciliation) === 1;
+
 $checks = [
     'php_strict_types' => str_contains($financial, 'declare(strict_types=1);'),
     'customer_identity_from_authenticated_session' => str_contains($customer, $literalUserId),
     'customer_does_not_use_request_identity' => !str_contains($customer, '$_GET[\'customer_id\']') && !str_contains($customer, '$_POST[\'customer_id\']'),
-    'prepared_statement' => str_contains($repository, '$this->db->prepare('),
+    'prepared_statement_repository' => str_contains($repository, '$this->db->prepare('),
     'financial_service_no_inline_sql' => !str_contains($service, 'SELECT ') && !str_contains($service, 'INSERT '),
     'bounded_pagination' => str_contains($service, 'MAX_PAGE_SIZE') && str_contains($repository, 'min(100'),
+    'reconciliation_controller_present' => $reconciliation !== '',
+    'reconciliation_view_present' => $reconciliationView !== '',
+    'reconciliation_admin_guard' => str_contains($reconciliation, 'require_admin();'),
+    'reconciliation_resolves_service' => str_contains($reconciliation, '$container->get(FinancialService::class)'),
+    'reconciliation_no_sql' => !$controllerSql,
+    'reconciliation_no_pdo_calls' => !str_contains($reconciliation, '->prepare(') && !str_contains($reconciliation, '->query(') && !str_contains($reconciliation, '->exec('),
+    'reconciliation_pagination_limit' => str_contains($reconciliation, 'RECONCILIATION_LIMIT_MAX = 100') && str_contains($reconciliation, 'max(1'),
+    'reconciliation_csv_content_type' => str_contains($reconciliation, "header('Content-Type: text/csv; charset=UTF-8');"),
+    'reconciliation_csv_disposition' => str_contains($reconciliation, 'Content-Disposition'),
+    'reconciliation_csv_injection_guard' => str_contains($reconciliation, "['=', '+', '-', '@']"),
+    'reconciliation_csv_allow_list' => str_contains($reconciliation, "'transaction_id'") && str_contains($reconciliation, "'customer'") && str_contains($reconciliation, "'amount'"),
+    'reconciliation_no_sensitive_export' => !str_contains($reconciliation, 'payload') && !str_contains($reconciliation, 'access_token') && !str_contains($reconciliation, 'webhook_secret') && !str_contains($reconciliation, 'qr_code_base64'),
+    'reconciliation_view_no_sql' => preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $reconciliationView) !== 1 && !str_contains($reconciliationView, '->prepare(') && !str_contains($reconciliationView, '->query('),
     'csrf_shared_helper' => str_contains($config, "require_once __DIR__ . '/includes/csrf.php';"),
     'csrf_verify_alias' => str_contains($csrf, 'function verify_csrf(): void'),
     'csrf_constant_time_compare' => str_contains($csrf, 'hash_equals('),
@@ -34,5 +51,8 @@ $checks = [
 ];
 
 $failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));
-foreach ($checks as $name => $ok) echo ($ok ? 'PASS' : 'FAIL') . ": $name\n";
+foreach ($checks as $name => $ok) {
+    echo ($ok ? 'PASS' : 'FAIL') . ": $name\n";
+}
+
 exit($failed ? 1 : 0);
