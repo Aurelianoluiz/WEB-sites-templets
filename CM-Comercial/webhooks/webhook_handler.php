@@ -40,8 +40,10 @@ try {
     if (!ctype_digit($externalReference) || $externalReference === '0') throw new InvalidArgumentException('Invalid external_reference.');
 
     $eventType = trim((string)($payload['type'] ?? $payload['action'] ?? 'payment'));
+    $action = trim((string)($payload['action'] ?? ''));
     $database = $container->get(Database::class);
-    $database->transaction(function (PDO $pdo) use ($externalReference, $dataId, $gatewayPayment, $eventType, $rawBody): void {
+
+    $database->transaction(function (PDO $pdo) use ($externalReference, $dataId, $gatewayPayment, $eventType, $action, $rawBody): void {
         $paymentQuery = $pdo->prepare('SELECT id,order_id,status,amount,webhook_event_id FROM payment_transactions WHERE order_id=? AND provider=\'mercadopago\' LIMIT 1 FOR UPDATE');
         $paymentQuery->execute([(int)$externalReference]);
         $payment = $paymentQuery->fetch();
@@ -50,19 +52,26 @@ try {
         $gatewayAmount = round((float)($gatewayPayment['raw']['transaction_amount'] ?? 0), 2);
         if ($gatewayAmount <= 0 || $gatewayAmount !== round((float)$payment['amount'], 2)) throw new RuntimeException('Payment amount mismatch.');
 
-        $requestId = '';
-        foreach (getallheaders() ?: [] as $name => $value) if (strtolower((string)$name) === 'x-request-id') $requestId = trim((string)$value);
-        $eventId = hash('sha256', implode('|', ['mp', $eventType, (string)$dataId, $gatewayPayment['status'], $gatewayPayment['transaction_id'], $requestId]));
+        // Transport identifiers are used by signature validation, not business identity.
+        $eventId = hash('sha256', implode('|', ['mp', $eventType, $action, $dataId, $gatewayPayment['status'], $gatewayPayment['transaction_id']]));
         if ((string)($payment['webhook_event_id'] ?? '') === $eventId) return;
 
         $oldStatus = (string)$payment['status'];
         $newStatus = $gatewayPayment['status'];
-        if ($oldStatus !== $newStatus) {
-            $update = $pdo->prepare('UPDATE payment_transactions SET provider_payment_id=?,status=?,webhook_event_id=?,last_webhook_at=CURRENT_TIMESTAMP(6),gateway_payload=?,updated_at=CURRENT_TIMESTAMP(6) WHERE id=? AND status=?');
-            $update->execute([$dataId,$newStatus,$eventId,json_encode($gatewayPayment['raw'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)$payment['id'],$oldStatus]);
-        } else {
-            $pdo->prepare('UPDATE payment_transactions SET provider_payment_id=?,webhook_event_id=?,last_webhook_at=CURRENT_TIMESTAMP(6),gateway_payload=?,updated_at=CURRENT_TIMESTAMP(6) WHERE id=?')->execute([$dataId,$eventId,json_encode($gatewayPayment['raw'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)$payment['id']]);
+        $allowed = [
+            'pending' => ['authorized','paid','failed','cancelled'],
+            'authorized' => ['paid','failed','cancelled'],
+            'paid' => ['refunded'],
+            'failed' => [],
+            'cancelled' => [],
+            'refunded' => [],
+        ];
+        if ($oldStatus !== $newStatus && !in_array($newStatus, $allowed[$oldStatus] ?? [], true)) {
+            throw new RuntimeException('Invalid payment state transition.');
         }
+
+        $update = $pdo->prepare('UPDATE payment_transactions SET provider_payment_id=?,status=?,webhook_event_id=?,last_webhook_at=CURRENT_TIMESTAMP(6),gateway_payload=?,updated_at=CURRENT_TIMESTAMP(6) WHERE id=?');
+        $update->execute([$dataId,$newStatus,$eventId,json_encode($gatewayPayment['raw'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)$payment['id']]);
 
         if ($newStatus === 'paid' || $newStatus === 'authorized') {
             $pdo->prepare('UPDATE orders SET payment_status=?,status=CASE WHEN status=\'pending\' THEN \'confirmed\' ELSE status END WHERE id=?')->execute([$newStatus,(int)$payment['order_id']]);
