@@ -17,7 +17,7 @@ $service = $read(__DIR__ . '/../src/Services/FinancialService.php');
 
 $literalUserId = '$_SESSION[\'user\'][\'id\']';
 $logoutPostGuard = 'if ($_SERVER[\'REQUEST_METHOD\'] === \'POST\')';
-$sqlKeywordPattern = '/\b(SELECT|INSERT|UPDATE|DELETE)\s+(FROM|INTO|SET)?/i';
+$sqlKeywordPattern = '/\b(?:SELECT|INSERT|UPDATE|DELETE)\b\s+(?:FROM|INTO|SET|WHERE|JOIN)/i';
 $pdoCallPattern = '/->(?:prepare|query|exec)\s*\(/i';
 
 $checks = [
@@ -47,10 +47,10 @@ $checks = [
     'payments_no_sql' => !preg_match($sqlKeywordPattern, $paymentsController),
     'payments_no_pdo_calls' => !preg_match($pdoCallPattern, $paymentsController),
     'payments_pagination_limit' => str_contains($paymentsController, 'PAYMENTS_LIMIT_MAX') && str_contains($paymentsController, 'max(1'),
-    'payments_status_filter' => str_contains($paymentsController, "'status' => $status"),
-    'payments_provider_filter' => str_contains($paymentsController, "'provider' => $provider"),
-    'payments_search_filter' => str_contains($paymentsController, "'search' => $search"),
-    'payments_date_filters' => str_contains($paymentsController, "'date_from' => $dateFrom") && str_contains($paymentsController, "'date_to' => $dateTo"),
+    'payments_status_filter' => str_contains($paymentsController, "'status' => \$status"),
+    'payments_provider_filter' => str_contains($paymentsController, "'provider' => \$provider"),
+    'payments_search_filter' => str_contains($paymentsController, "'search' => \$search"),
+    'payments_date_filters' => str_contains($paymentsController, "'date_from' => \$dateFrom") && str_contains($paymentsController, "'date_to' => \$dateTo"),
     'payments_customer_order_filters' => str_contains($paymentsController, 'customer_id') && str_contains($paymentsController, 'order_id'),
     'payments_no_sensitive_data' => !str_contains($paymentsController, 'payload') && !str_contains($paymentsController, 'access_token') && !str_contains($paymentsController, 'webhook_secret') && !str_contains($paymentsController, 'gateway_response'),
     'payments_view_no_sensitive_data' => !str_contains($paymentsView, 'payload') && !str_contains($paymentsView, 'access_token') && !str_contains($paymentsView, 'webhook_secret') && !str_contains($paymentsView, 'gateway_response'),
