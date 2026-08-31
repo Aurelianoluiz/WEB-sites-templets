@@ -71,7 +71,8 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         $search = $filters['search'] ?? null;
         if (is_string($search) && trim($search) !== '') {
             $term = '%' . trim($search) . '%';
-            $conditions[] = '(CAST(p.id AS CHAR) LIKE ? OR CAST(p.order_id AS CHAR) LIKE ? OR p.transaction_id LIKE ?)';
+            $conditions[] = '(CAST(p.id AS CHAR) LIKE ? OR CAST(p.order_id AS CHAR) LIKE ? OR p.transaction_id LIKE ? OR o.email LIKE ?)';
+            $params[] = $term;
             $params[] = $term;
             $params[] = $term;
             $params[] = $term;
@@ -132,6 +133,12 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
             $params[] = (int)$customerId;
         }
 
+        $orderId = $filters['order_id'] ?? null;
+        if (is_numeric($orderId) && (int)$orderId > 0) {
+            $conditions[] = 'p.order_id = ?';
+            $params[] = (int)$orderId;
+        }
+
         $dateFrom = $this->normalizeDate($filters['date_from'] ?? null, false);
         if ($dateFrom !== null) {
             $conditions[] = 'p.created_at >= ?';
@@ -142,6 +149,16 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         if ($dateTo !== null) {
             $conditions[] = 'p.created_at <= ?';
             $params[] = $dateTo;
+        }
+
+        $search = $filters['search'] ?? null;
+        if (is_string($search) && trim($search) !== '') {
+            $term = '%' . trim($search) . '%';
+            $conditions[] = '(CAST(p.id AS CHAR) LIKE ? OR CAST(p.order_id AS CHAR) LIKE ? OR p.transaction_id LIKE ? OR o.email LIKE ?)';
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
         }
 
         $sql = 'SELECT
