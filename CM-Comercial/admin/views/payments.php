@@ -14,22 +14,15 @@ declare(strict_types=1);
  * @var int $total
  * @var int $totalPages
  * @var string $gateway
+ * @var ?string $error
+ * @var array<string, scalar> $queryFilters
  */
 
-$query = static function (array $overrides = []): string {
-    $params = [
-        'status' => $GLOBALS['status'] ?? '',
-        'provider' => $GLOBALS['provider'] ?? '',
-        'search' => $GLOBALS['search'] ?? '',
-        'date_from' => $GLOBALS['dateFrom'] ?? '',
-        'date_to' => $GLOBALS['dateTo'] ?? '',
-        'limit' => $GLOBALS['limit'] ?? 50,
-    ];
-    foreach ($overrides as $key => $value) {
-        $params[$key] = $value;
-    }
-    $params = array_filter($params, static fn (mixed $value): bool => $value !== '' && $value !== null);
-    return http_build_query($params);
+$buildQuery = static function (array $overrides = []) use ($queryFilters): string {
+    return http_build_query(array_filter(
+        array_merge($queryFilters, $overrides),
+        static fn (mixed $value): bool => $value !== '' && $value !== null
+    ));
 };
 ?>
 <div class="admin-head">
@@ -41,8 +34,12 @@ $query = static function (array $overrides = []): string {
     <a href="reconciliation.php" class="btn">Conciliação →</a>
 </div>
 
+<?php if ($error !== null): ?>
+    <div class="alert error"><?= e($error) ?></div>
+<?php endif; ?>
+
 <div class="summary">
-    <div class="panel"><span>Gateway</span><strong><?= e($gateway) ?></strong></div>
+    <div class="panel"><span>Gateway configurado</span><strong><?= e($gateway) ?></strong></div>
     <div class="panel"><span>Registros encontrados</span><strong><?= e((string)$total) ?></strong></div>
     <div class="panel"><span>Página</span><strong><?= e((string)$page) ?> / <?= e((string)$totalPages) ?></strong></div>
 </div>
@@ -116,9 +113,9 @@ $query = static function (array $overrides = []): string {
 
 <nav class="pagination" aria-label="Paginação de pagamentos">
     <?php if ($page > 1): ?>
-        <a class="btn" href="payments.php?<?= e($query(['page' => $page - 1])) ?>">← Anterior</a>
+        <a class="btn" href="payments.php?<?= e($buildQuery(['page' => $page - 1])) ?>">← Anterior</a>
     <?php endif; ?>
     <?php if ($page < $totalPages): ?>
-        <a class="btn" href="payments.php?<?= e($query(['page' => $page + 1])) ?>">Próxima →</a>
+        <a class="btn" href="payments.php?<?= e($buildQuery(['page' => $page + 1])) ?>">Próxima →</a>
     <?php endif; ?>
 </nav>
