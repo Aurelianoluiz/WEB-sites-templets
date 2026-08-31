@@ -6,18 +6,14 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use App\Repositories\OrderRepository;
 use App\Repositories\ProductRepository;
 use App\Services\AdminOrderService;
-use PDO;
 
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $service = new AdminOrderService($pdo, new OrderRepository($pdo), new ProductRepository($pdo));
 
 $valid = [
-    ['pending', 'confirmed'],
-    ['confirmed', 'preparing'],
-    ['preparing', 'shipped'],
-    ['shipped', 'delivered'],
-    ['pending', 'cancelled'],
+    ['pending', 'confirmed'], ['confirmed', 'preparing'], ['preparing', 'shipped'],
+    ['shipped', 'delivered'], ['pending', 'cancelled'],
 ];
 foreach ($valid as [$from, $to]) {
     if (!$service->isValidTransition($from, $to)) {
@@ -27,10 +23,7 @@ foreach ($valid as [$from, $to]) {
 }
 
 $invalid = [
-    ['delivered', 'cancelled'],
-    ['shipped', 'pending'],
-    ['cancelled', 'confirmed'],
-    ['preparing', 'pending'],
+    ['delivered', 'cancelled'], ['shipped', 'pending'], ['cancelled', 'confirmed'], ['preparing', 'pending'],
 ];
 foreach ($invalid as [$from, $to]) {
     if ($service->isValidTransition($from, $to)) {
