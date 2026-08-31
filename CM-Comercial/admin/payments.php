@@ -54,7 +54,6 @@ $limit = min(
     PAYMENTS_LIMIT_MAX,
     max(1, (int)($_GET['limit'] ?? PAYMENTS_LIMIT_DEFAULT))
 );
-$offset = ($page - 1) * $limit;
 
 $financialService = $container->get(FinancialService::class);
 $error = null;
@@ -71,16 +70,25 @@ $summary = [
 ];
 
 try {
-    $payments = $financialService->listReconciliation($filters, $limit, $offset);
     $summary = $financialService->getReconciliationSummary($filters);
+    $total = (int)($summary['count'] ?? 0);
+    $totalPages = max(1, (int)ceil($total / $limit));
+    $page = min($page, $totalPages);
+    $offset = ($page - 1) * $limit;
+
+    $payments = $financialService->listReconciliation(
+        $filters,
+        $limit,
+        $offset
+    );
 } catch (Throwable $e) {
     http_response_code(400);
     $error = $e->getMessage();
+    $total = 0;
+    $totalPages = 1;
+    $offset = 0;
 }
 
-$total = (int)($summary['count'] ?? 0);
-$totalPages = max(1, (int)ceil($total / $limit));
-$page = min($page, $totalPages);
 $queryFilters = array_filter(
     [
         'status' => $status,
