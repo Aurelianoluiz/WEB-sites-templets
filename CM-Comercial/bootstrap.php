@@ -6,6 +6,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 use App\Config\Database;
 use App\Core\Container;
 use App\Gateways\MercadoPagoGateway;
+use App\Gateways\PaymentGatewayInterface;
 use App\Security\CsrfManager;
 use App\Security\WebhookValidator;
 use App\Services\PaymentService;
@@ -18,9 +19,10 @@ $container->singleton(WebhookValidator::class, static fn (): WebhookValidator =>
     (int)(getenv('MP_WEBHOOK_MAX_SKEW') ?: 300)
 ));
 $container->singleton(MercadoPagoGateway::class, static fn (): MercadoPagoGateway => new MercadoPagoGateway());
+$container->singleton(PaymentGatewayInterface::class, static fn (Container $c): PaymentGatewayInterface => $c->get(MercadoPagoGateway::class));
 $container->singleton(PaymentService::class, static fn (Container $c): PaymentService => new PaymentService(
     $c->get(Database::class),
-    $c->get(MercadoPagoGateway::class)
+    $c->get(PaymentGatewayInterface::class)
 ));
 
 return $container;
