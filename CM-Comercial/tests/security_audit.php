@@ -8,6 +8,8 @@ $csrf = $read(__DIR__ . '/../includes/csrf.php');
 $checkout = $read(__DIR__ . '/../includes/checkout_payment.php');
 $config = $read(__DIR__ . '/../config.php');
 $logout = $read(__DIR__ . '/../logout.php');
+$repository = $read(__DIR__ . '/../src/Repositories/PaymentTransactionRepository.php');
+$service = $read(__DIR__ . '/../src/Services/FinancialService.php');
 
 $literalUserId = '$_SESSION[\'user\'][\'id\']';
 $logoutPostGuard = 'if ($_SERVER[\'REQUEST_METHOD\'] === \'POST\')';
@@ -15,8 +17,9 @@ $checks = [
     'php_strict_types' => str_contains($financial, 'declare(strict_types=1);'),
     'customer_identity_from_authenticated_session' => str_contains($customer, $literalUserId),
     'customer_does_not_use_request_identity' => !str_contains($customer, '$_GET[\'customer_id\']') && !str_contains($customer, '$_POST[\'customer_id\']'),
-    'prepared_statement' => str_contains($financial, '$pdo->prepare('),
-    'bounded_pagination' => str_contains($financial, 'min(100'),
+    'prepared_statement' => str_contains($repository, '$this->db->prepare('),
+    'financial_service_no_inline_sql' => !str_contains($service, 'SELECT ') && !str_contains($service, 'INSERT '),
+    'bounded_pagination' => str_contains($service, 'MAX_PAGE_SIZE') && str_contains($repository, 'min(100'),
     'csrf_shared_helper' => str_contains($config, "require_once __DIR__ . '/includes/csrf.php';"),
     'csrf_verify_alias' => str_contains($csrf, 'function verify_csrf(): void'),
     'csrf_constant_time_compare' => str_contains($csrf, 'hash_equals('),
