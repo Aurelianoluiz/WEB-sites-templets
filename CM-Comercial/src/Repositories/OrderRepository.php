@@ -39,11 +39,18 @@ final class OrderRepository implements OrderRepositoryInterface
         }
 
         try {
+            if (ctype_digit($ref)) {
+                $row = $this->findById((int)$ref);
+                if ($row !== null) {
+                    return $row;
+                }
+            }
+
             $stmt = $this->db->prepare(
                 'SELECT o.*, u.name AS user_name, u.email AS user_email
                  FROM orders o
                  LEFT JOIN users u ON u.id = o.user_id
-                 WHERE o.reference = ? LIMIT 1'
+                 WHERE o.idempotency_key = ? LIMIT 1'
             );
             $stmt->execute([$ref]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -113,9 +120,7 @@ final class OrderRepository implements OrderRepositoryInterface
     {
         try {
             if ($paymentStatus !== null) {
-                $stmt = $this->db->prepare(
-                    'UPDATE orders SET status = ?, payment_status = ? WHERE id = ?'
-                );
+                $stmt = $this->db->prepare('UPDATE orders SET status = ?, payment_status = ? WHERE id = ?');
                 $stmt->execute([$status, $paymentStatus, $id]);
                 return $stmt->rowCount() >= 0;
             }
@@ -128,21 +133,15 @@ final class OrderRepository implements OrderRepositoryInterface
         }
     }
 
-    public function recordStatusHistory(
-        int $orderId,
-        string $from,
-        string $to,
-        ?int $actorUserId,
-        string $note = ''
-    ): bool {
+    public function recordStatusHistory(int $orderId, string $from, string $to, ?int $actorUserId, string $note = ''): bool
+    {
         if ($from === $to) {
             return true;
         }
 
         try {
             $stmt = $this->db->prepare(
-                'INSERT INTO order_status_history
-                    (order_id, from_status, to_status, actor_user_id, note)
+                'INSERT INTO order_status_history (order_id, from_status, to_status, actor_user_id, note)
                  VALUES (?, ?, ?, ?, ?)'
             );
             return $stmt->execute([$orderId, $from, $to, $actorUserId, $note]);
@@ -203,10 +202,6 @@ final class OrderRepository implements OrderRepositoryInterface
 
     public function listAll(string $statusFilter = '', int $limit = 50, int $offset = 0): array
     {
-        return $this->listWithFilters(
-            $statusFilter === '' ? [] : ['status' => $statusFilter],
-            $limit,
-            $offset
-        );
+        return $this->listWithFilters($statusFilter === '' ? [] : ['status' => $statusFilter], $limit, $offset);
     }
 }
