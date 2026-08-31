@@ -46,15 +46,15 @@ assert_true(
 assert_true(!str_contains($controller, '->prepare('), 'Controller must not prepare SQL.');
 assert_true(!str_contains($controller, '->query('), 'Controller must not query PDO directly.');
 assert_true(!str_contains($controller, '->exec('), 'Controller must not execute PDO directly.');
-assert_true(str_contains($controller, "['status' => $status"]), 'Status filter is missing.');
-assert_true(str_contains($controller, "'provider' => $provider"), 'Provider filter is missing.');
-assert_true(str_contains($controller, "'search' => $search"), 'Search filter is missing.');
-assert_true(str_contains($controller, "'date_from' => $dateFrom"), 'Start date filter is missing.');
-assert_true(str_contains($controller, "'date_to' => $dateTo"), 'End date filter is missing.');
+assert_true(str_contains($controller, "'status' => \$status"), 'Status filter is missing.');
+assert_true(str_contains($controller, "'provider' => \$provider"), 'Provider filter is missing.');
+assert_true(str_contains($controller, "'search' => \$search"), 'Search filter is missing.');
+assert_true(str_contains($controller, "'date_from' => \$dateFrom"), 'Start date filter is missing.');
+assert_true(str_contains($controller, "'date_to' => \$dateTo"), 'End date filter is missing.');
 assert_true(str_contains($controller, 'customer_id'), 'Customer id filter is missing.');
 assert_true(str_contains($controller, 'order_id'), 'Order id filter is missing.');
 assert_true(str_contains($controller, 'min(1)'), 'Defensive minimum pagination bound is missing.');
-assert_true(str_contains($controller, 'min(') && str_contains($controller, 'PAYMENTS_LIMIT_MAX'), 'Maximum pagination bound is missing.');
+assert_true(str_contains($controller, 'PAYMENTS_LIMIT_MAX') && str_contains($controller, 'max(1'), 'Maximum pagination bound is missing.');
 assert_true(str_contains($controller, '$page = max(1'), 'Page lower bound is missing.');
 assert_true(str_contains($view, 'status-pill'), 'Payment status badge is missing.');
 assert_true(str_contains($view, 'payments.php?'), 'Pagination query links are missing.');
@@ -80,7 +80,6 @@ foreach ($forbidden as $field) {
     );
 }
 
-// Integration-level verification of the actual Service/Repository contract.
 $pdo = new \PDO('sqlite::memory:');
 $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
