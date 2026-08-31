@@ -30,19 +30,12 @@ function assert_same(mixed $expected, mixed $actual, string $message): void
 
 $controllerPath = __DIR__ . '/../admin/payments.php';
 $viewPath = __DIR__ . '/../admin/views/payments.php';
-
 $controller = (string)file_get_contents($controllerPath);
 $view = (string)file_get_contents($viewPath);
 
 assert_true(str_contains($controller, 'require_admin();'), 'Admin guard is missing.');
-assert_true(
-    str_contains($controller, '$container->get(FinancialService::class)'),
-    'FinancialService must be resolved through the Container.'
-);
-assert_true(
-    !preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller),
-    'Controller must not contain SQL keywords.'
-);
+assert_true(str_contains($controller, '$container->get(FinancialService::class)'), 'FinancialService must be resolved through the Container.');
+assert_true(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller), 'Controller must not contain SQL keywords.');
 assert_true(!str_contains($controller, '->prepare('), 'Controller must not prepare SQL.');
 assert_true(!str_contains($controller, '->query('), 'Controller must not query PDO directly.');
 assert_true(!str_contains($controller, '->exec('), 'Controller must not execute PDO directly.');
@@ -53,8 +46,8 @@ assert_true(str_contains($controller, "'date_from' => \$dateFrom"), 'Start date 
 assert_true(str_contains($controller, "'date_to' => \$dateTo"), 'End date filter is missing.');
 assert_true(str_contains($controller, 'customer_id'), 'Customer id filter is missing.');
 assert_true(str_contains($controller, 'order_id'), 'Order id filter is missing.');
-assert_true(str_contains($controller, 'min(1)'), 'Defensive minimum pagination bound is missing.');
-assert_true(str_contains($controller, 'PAYMENTS_LIMIT_MAX') && str_contains($controller, 'max(1'), 'Maximum pagination bound is missing.');
+assert_true(str_contains($controller, 'max(1'), 'Defensive minimum pagination bound is missing.');
+assert_true(str_contains($controller, 'PAYMENTS_LIMIT_MAX') && str_contains($controller, 'min('), 'Maximum pagination bound is missing.');
 assert_true(str_contains($controller, '$page = max(1'), 'Page lower bound is missing.');
 assert_true(str_contains($view, 'status-pill'), 'Payment status badge is missing.');
 assert_true(str_contains($view, 'payments.php?'), 'Pagination query links are missing.');
@@ -113,10 +106,7 @@ $pdo->exec("INSERT INTO orders VALUES (2, 102, 'Cliente B', 'b@example.test', 'c
 $pdo->exec("INSERT INTO payments VALUES (1, 1, 150.00, 'pix', 'paid', 'mp-001', 'mercadopago', '2026-08-28 10:05:00', '2026-08-28 10:06:00')");
 $pdo->exec("INSERT INTO payments VALUES (2, 2, 75.00, 'pix', 'pending', 'mp-002', 'mercadopago', '2026-08-29 10:05:00', '2026-08-29 10:06:00')");
 
-$service = new FinancialService(
-    $pdo,
-    new PaymentTransactionRepository($pdo)
-);
+$service = new FinancialService($pdo, new PaymentTransactionRepository($pdo));
 
 $filtered = $service->listReconciliation(
     [
@@ -133,12 +123,7 @@ $filtered = $service->listReconciliation(
 assert_same(1, count($filtered), 'Service filter result is incorrect.');
 assert_same(1, (int)$filtered[0]['id'], 'Service filter returned the wrong payment.');
 
-$customerSearch = $service->listReconciliation(
-    ['search' => 'b@example.test'],
-    100,
-    0
-);
-
+$customerSearch = $service->listReconciliation(['search' => 'b@example.test'], 100, 0);
 assert_same(1, count($customerSearch), 'Customer email search is not supported by the repository.');
 assert_same(2, (int)$customerSearch[0]['id'], 'Customer email search returned the wrong payment.');
 
