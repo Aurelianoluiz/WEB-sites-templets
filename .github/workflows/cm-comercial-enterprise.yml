@@ -1,0 +1,66 @@
+name: CM Comercial Enterprise Architecture
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'CM-Comercial/composer.json'
+      - 'CM-Comercial/bootstrap.php'
+      - 'CM-Comercial/config/**'
+      - 'CM-Comercial/database/**'
+      - 'CM-Comercial/src/**'
+      - 'CM-Comercial/assets/css/app.css'
+      - 'CM-Comercial/assets/js/checkout.js'
+      - 'CM-Comercial/checkout.php'
+      - 'CM-Comercial/api/**'
+      - 'CM-Comercial/webhooks/**'
+      - 'CM-Comercial/tests/enterprise_architecture_test.php'
+      - '.github/workflows/cm-comercial-enterprise.yml'
+  pull_request:
+    paths:
+      - 'CM-Comercial/composer.json'
+      - 'CM-Comercial/bootstrap.php'
+      - 'CM-Comercial/config/**'
+      - 'CM-Comercial/database/**'
+      - 'CM-Comercial/src/**'
+      - 'CM-Comercial/assets/css/app.css'
+      - 'CM-Comercial/assets/js/checkout.js'
+      - 'CM-Comercial/checkout.php'
+      - 'CM-Comercial/api/**'
+      - 'CM-Comercial/webhooks/**'
+      - 'CM-Comercial/tests/enterprise_architecture_test.php'
+      - '.github/workflows/cm-comercial-enterprise.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  enterprise:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_mysql, curl
+          coverage: none
+
+      - name: Install Composer dependencies
+        working-directory: CM-Comercial
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHP syntax check
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do php -l "$file"; done < <(find CM-Comercial -type f -name '*.php' ! -path 'CM-Comercial/vendor/*' -print0)
+
+      - name: Enterprise architecture smoke test
+        run: php CM-Comercial/tests/enterprise_architecture_test.php
