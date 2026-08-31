@@ -45,6 +45,7 @@ $required = [
     __DIR__ . '/admin_order_transition_test.php',
     __DIR__ . '/financial_service_test.php',
     __DIR__ . '/reconciliation_controller_test.php',
+    __DIR__ . '/payments_controller_test.php',
 ];
 
 $missing = array_values(array_filter($required, static fn(string $path): bool => !is_file($path)));
