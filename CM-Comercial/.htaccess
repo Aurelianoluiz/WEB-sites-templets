@@ -4,12 +4,24 @@ Options -Indexes
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
 </IfModule>
 
-<FilesMatch "^(\.env|\.env\..*|.*\.(sqlite|sqlite3|db|log))$">
+<FilesMatch "^(\.env|\.env\..*|.*\.(sqlite|sqlite3|db|log|sql))$">
     Require all denied
 </FilesMatch>
 
-<Directory "data">
-    Require all denied
-</Directory>
+<IfModule mod_authz_core.c>
+    <Directory "data">
+        Require all denied
+    </Directory>
+    <Directory "src">
+        Require all denied
+    </Directory>
+    <Directory "config">
+        Require all denied
+    </Directory>
+    <Directory "database">
+        Require all denied
+    </Directory>
+</IfModule>
