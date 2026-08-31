@@ -1,92 +1,94 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../includes/payment_core.php';
-require_once __DIR__ . '/../includes/payment_order_policy.php';
-require_once __DIR__ . '/../includes/checkout_payment.php';
-require_once __DIR__ . '/../includes/mp_webhook_signature.php';
-require_once __DIR__ . '/../integrations/payment_service.php';
-require_once __DIR__ . '/../integrations/payment_adapter.php';
-require_once __DIR__ . '/../integrations/mercadopago_adapter.php';
+$container = require dirname(__DIR__) . '/bootstrap.php';
+
+use App\Config\Database;
+use App\Gateways\MercadoPagoGateway;
+use App\Security\WebhookValidator;
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     header('Allow: POST');
     http_response_code(405);
-    exit('Method Not Allowed');
+    echo json_encode(['received' => false, 'error' => 'method_not_allowed']);
+    exit;
 }
 
 $rawBody = (string)file_get_contents('php://input');
 $headers = function_exists('getallheaders') ? (getallheaders() ?: []) : [];
-$normalized = [];
-foreach ($headers as $key => $value) $normalized[strtolower((string)$key)] = trim((string)$value);
-$headers = $normalized;
-
-$secret = trim((string)(getenv('MP_WEBHOOK_SECRET') ?: ''));
-$env = strtolower(trim((string)(getenv('APP_ENV') ?: 'production')));
-if ($secret === '') {
-    error_log('[webhook] MP_WEBHOOK_SECRET is not configured.');
-    http_response_code($env === 'production' ? 503 : 401);
-    exit('Webhook not configured');
-}
-
-if (!verify_mp_webhook_signature($rawBody, $headers, $secret)) {
-    http_response_code(401);
-    exit('Unauthorized');
-}
 
 try {
-    process_gateway_webhook($rawBody, $headers);
-    header('Content-Type: application/json; charset=utf-8');
-    http_response_code(200);
-    echo json_encode(['received' => true], JSON_UNESCAPED_UNICODE);
-} catch (Throwable $e) {
-    error_log('[webhook] processing failed: ' . $e->getMessage());
-    http_response_code(500);
-    echo json_encode(['received' => false], JSON_UNESCAPED_UNICODE);
-}
-
-function process_gateway_webhook(string $rawBody, array $headers): void
-{
-    if (payment_gateway_name() !== 'mercadopago') return;
-    $adapter = resolve_payment_adapter('mercadopago');
-    if ($adapter === null) throw new RuntimeException('Mercado Pago adapter indisponível.');
-    $event = $adapter->parseWebhook($rawBody, $headers);
-
-    $orderId = (int)($event['payment_id'] ?? 0);
-    if ($orderId < 1) throw new RuntimeException('external_reference inválida.');
-
-    $pdo = db();
-    ensure_payment_schema($pdo);
-    $stmt = $pdo->prepare('SELECT id, amount FROM payments WHERE order_id=? LIMIT 1');
-    $stmt->execute([$orderId]);
-    $paymentRow = $stmt->fetch();
-    $paymentId = (int)($paymentRow['id'] ?? 0);
-    if ($paymentId < 1) throw new RuntimeException('Pagamento interno não encontrado.');
-
-    $gatewayAmount = isset($event['raw']['transaction_amount']) ? (float)$event['raw']['transaction_amount'] : null;
-    $internalAmount = round((float)($paymentRow['amount'] ?? 0), 2);
-    if ($gatewayAmount === null || round($gatewayAmount, 2) !== $internalAmount) {
-        throw new RuntimeException('Valor do pagamento divergente da cobrança interna.');
+    /** @var WebhookValidator $validator */
+    $validator = $container->get(WebhookValidator::class);
+    if (!$validator->validate($rawBody, $headers)) {
+        http_response_code(401);
+        echo json_encode(['received' => false, 'error' => 'invalid_signature']);
+        exit;
     }
 
-    $isNewEvent = apply_gateway_event(
-        $pdo,
-        $paymentId,
-        (string)$event['event_id'],
-        (string)$event['type'],
-        (string)$event['status'],
-        $event['transaction_id'] ?? null,
-        (array)($event['raw'] ?? []),
-        static function (PDO $transactionalPdo, int $paymentId, string $paymentStatus, ?string $transactionId) use ($orderId): void {
-            $orderStmt = $transactionalPdo->prepare('SELECT status FROM orders WHERE id=?');
-            $orderStmt->execute([$orderId]);
-            $orderStatus = (string)($orderStmt->fetchColumn() ?: 'pending');
-            $decision = payment_order_decision($paymentStatus, $orderStatus);
-            apply_order_decision($transactionalPdo, $orderId, $decision, null);
-            $transactionalPdo->prepare('UPDATE orders SET payment_status=? WHERE id=?')->execute([$paymentStatus, $orderId]);
-        }
-    );
+    $payload = json_decode($rawBody, true, 512, JSON_THROW_ON_ERROR);
+    $dataId = trim((string)($payload['data']['id'] ?? ''));
+    if (!ctype_digit($dataId) || $dataId === '0') throw new InvalidArgumentException('Invalid data.id.');
 
-    if (!$isNewEvent) return;
+    /** @var MercadoPagoGateway $gateway */
+    $gateway = $container->get(MercadoPagoGateway::class);
+    $gatewayPayment = $gateway->getPayment($dataId);
+    $externalReference = trim((string)($gatewayPayment['raw']['external_reference'] ?? ''));
+    if (!ctype_digit($externalReference) || $externalReference === '0') throw new InvalidArgumentException('Invalid external_reference.');
+
+    $eventType = trim((string)($payload['type'] ?? $payload['action'] ?? 'payment'));
+    $database = $container->get(Database::class);
+    $database->transaction(function (PDO $pdo) use ($externalReference, $dataId, $gatewayPayment, $eventType, $rawBody): void {
+        $paymentQuery = $pdo->prepare('SELECT id,order_id,status,amount,webhook_event_id FROM payment_transactions WHERE order_id=? AND provider=\'mercadopago\' LIMIT 1 FOR UPDATE');
+        $paymentQuery->execute([(int)$externalReference]);
+        $payment = $paymentQuery->fetch();
+        if ($payment === false) throw new RuntimeException('Internal payment transaction not found.');
+
+        $gatewayAmount = round((float)($gatewayPayment['raw']['transaction_amount'] ?? 0), 2);
+        if ($gatewayAmount <= 0 || $gatewayAmount !== round((float)$payment['amount'], 2)) throw new RuntimeException('Payment amount mismatch.');
+
+        $requestId = '';
+        foreach (getallheaders() ?: [] as $name => $value) if (strtolower((string)$name) === 'x-request-id') $requestId = trim((string)$value);
+        $eventId = hash('sha256', implode('|', ['mp', $eventType, (string)$dataId, $gatewayPayment['status'], $gatewayPayment['transaction_id'], $requestId]));
+        if ((string)($payment['webhook_event_id'] ?? '') === $eventId) return;
+
+        $oldStatus = (string)$payment['status'];
+        $newStatus = $gatewayPayment['status'];
+        if ($oldStatus !== $newStatus) {
+            $update = $pdo->prepare('UPDATE payment_transactions SET provider_payment_id=?,status=?,webhook_event_id=?,last_webhook_at=CURRENT_TIMESTAMP(6),gateway_payload=?,updated_at=CURRENT_TIMESTAMP(6) WHERE id=? AND status=?');
+            $update->execute([$dataId,$newStatus,$eventId,json_encode($gatewayPayment['raw'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)$payment['id'],$oldStatus]);
+        } else {
+            $pdo->prepare('UPDATE payment_transactions SET provider_payment_id=?,webhook_event_id=?,last_webhook_at=CURRENT_TIMESTAMP(6),gateway_payload=?,updated_at=CURRENT_TIMESTAMP(6) WHERE id=?')->execute([$dataId,$eventId,json_encode($gatewayPayment['raw'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)$payment['id']]);
+        }
+
+        if ($newStatus === 'paid' || $newStatus === 'authorized') {
+            $pdo->prepare('UPDATE orders SET payment_status=?,status=CASE WHEN status=\'pending\' THEN \'confirmed\' ELSE status END WHERE id=?')->execute([$newStatus,(int)$payment['order_id']]);
+        } elseif (in_array($newStatus,['failed','cancelled'],true) && !in_array($oldStatus,['failed','cancelled','refunded'],true)) {
+            $items=$pdo->prepare('SELECT product_id,quantity FROM order_items WHERE order_id=?'); $items->execute([(int)$payment['order_id']]);
+            $restore=$pdo->prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?');
+            while($item=$items->fetch()) $restore->execute([(int)$item['quantity'],(int)$item['product_id']]);
+            $pdo->prepare('UPDATE orders SET payment_status=?,status=\'cancelled\' WHERE id=? AND status<>\'delivered\'')->execute([$newStatus,(int)$payment['order_id']]);
+        } elseif ($newStatus === 'refunded' && !in_array($oldStatus,['cancelled','failed','refunded'],true)) {
+            $items=$pdo->prepare('SELECT product_id,quantity FROM order_items WHERE order_id=?'); $items->execute([(int)$payment['order_id']]);
+            $restore=$pdo->prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?');
+            while($item=$items->fetch()) $restore->execute([(int)$item['quantity'],(int)$item['product_id']]);
+            $pdo->prepare('UPDATE orders SET payment_status=? WHERE id=?')->execute([$newStatus,(int)$payment['order_id']]);
+        }
+
+        $audit=$pdo->prepare('INSERT INTO payment_audit_log(payment_transaction_id,event_type,old_status,new_status,actor,payload) VALUES(?,?,?,?,\'mercadopago-webhook\',?)');
+        $audit->execute([(int)$payment['id'],$eventType,$oldStatus,$newStatus,json_encode(['event_id'=>$eventId,'body'=>$rawBody],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)]);
+    });
+
+    http_response_code(200);
+    echo json_encode(['received' => true]);
+} catch (InvalidArgumentException $e) {
+    http_response_code(422);
+    echo json_encode(['received' => false, 'error' => 'invalid_payload']);
+} catch (Throwable $e) {
+    error_log('[cm-comercial webhook] ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['received' => false, 'error' => 'processing_failed']);
 }
