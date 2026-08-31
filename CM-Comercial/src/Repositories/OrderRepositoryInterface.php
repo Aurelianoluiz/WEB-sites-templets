@@ -14,4 +14,15 @@ interface OrderRepositoryInterface
     public function recordStatusHistory(int $orderId, string $from, string $to, ?int $actorUserId, string $note = ''): bool;
     public function listWithFilters(array $filters, int $limit = 50, int $offset = 0): array;
     public function listAll(string $statusFilter = '', int $limit = 50, int $offset = 0): array;
+
+    /**
+     * @param array<string, scalar|null> $filters
+     * @return list<array<string, mixed>>
+     */
+    public function listWithoutPaymentTransaction(array $filters = [], int $limit = 50, int $offset = 0): array;
+
+    /**
+     * @param array<string, scalar|null> $filters
+     */
+    public function countWithoutPaymentTransaction(array $filters = []): int;
 }
