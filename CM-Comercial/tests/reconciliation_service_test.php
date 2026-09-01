@@ -73,10 +73,14 @@ final class FakeReconciliationRepository implements ReconciliationRepositoryInte
         ];
         foreach ($rows as $row) {
             $state = (string)($row['reconciliation_status'] ?? 'inconsistent');
-            if (isset($summary[$state]) && is_int($summary[$state])) $summary[$state]++;
+            if (isset($summary[$state]) && is_int($summary[$state])) {
+                $summary[$state]++;
+            }
             $reason = (string)($row['divergence_reason'] ?? '');
             foreach (['amount_mismatches' => 'amount_mismatch', 'status_mismatches' => 'status_mismatch', 'orphan_transactions' => 'orphan_transaction', 'missing_transactions' => 'missing_payment_transaction'] as $key => $expected) {
-                if ($reason === $expected) $summary[$key]++;
+                if ($reason === $expected) {
+                    $summary[$key]++;
+                }
             }
         }
         return $summary;
@@ -92,7 +96,9 @@ final class FakeReconciliationRepository implements ReconciliationRepositoryInte
     {
         return array_values(array_filter($this->rows, static function (array $row) use ($filters): bool {
             foreach (['status', 'provider', 'customer_id', 'order_id', 'reconciliation_status', 'divergence_reason'] as $key) {
-                if (isset($filters[$key]) && $filters[$key] !== '' && (string)($row[$key] ?? '') !== (string)$filters[$key]) return false;
+                if (isset($filters[$key]) && $filters[$key] !== '' && (string)($row[$key] ?? '') !== (string)$filters[$key]) {
+                    return false;
+                }
             }
             return true;
         }));
@@ -117,7 +123,9 @@ final class FakePaymentTransactionRepository implements PaymentTransactionReposi
     public function updateStatus(int $id, string $status): bool
     {
         $this->updateCalls++;
-        if (!isset($this->transactions[$id])) return false;
+        if (!isset($this->transactions[$id])) {
+            return false;
+        }
         $this->transactions[$id]['status'] = $status;
         $this->updatedStatus = $status;
         return true;
@@ -141,7 +149,9 @@ final class FakePaymentAuditRepository implements PaymentAuditRepositoryInterfac
     {
         $this->resolutionCalls++;
         $this->lastKey = $idempotencyKey;
-        if ($idempotencyKey !== null) $this->processed[$idempotencyKey] = true;
+        if ($idempotencyKey !== null) {
+            $this->processed[$idempotencyKey] = true;
+        }
         return true;
     }
 
@@ -180,33 +190,32 @@ $paymentRepo = new FakePaymentTransactionRepository($paymentTransactions);
 $auditRepo = new FakePaymentAuditRepository();
 $service = new ReconciliationService($reconciliationRepo, $paymentRepo, $auditRepo);
 
-rsSameValue:
 $summary = $service->getSummary();
-rsSameValue(6, $summary['total'], 'Summary total failed.');
-rsSameValue(2, $summary['divergent'], 'Divergent count failed.');
-rsSameValue(2, $summary['inconsistent'], 'Inconsistent count failed.');
+rsSame(6, $summary['total'], 'Summary total failed.');
+rsSame(2, $summary['divergent'], 'Divergent count failed.');
+rsSame(2, $summary['inconsistent'], 'Inconsistent count failed.');
 
 $page = $service->getPage([], 2, 0);
-rsSameValue(2, count($page['items']), 'Page size failed.');
-rsSameValue(3, $page['total_pages'], 'Total pages failed.');
-rsSameValue(100, $service->getPage([], 500, 0)['limit'], 'Limit cap failed.');
+rsSame(2, count($page['items']), 'Page size failed.');
+rsSame(3, $page['total_pages'], 'Total pages failed.');
+rsSame(100, $service->getPage([], 500, 0)['limit'], 'Limit cap failed.');
 rsThrows(static fn(): array => $service->getPage([], 0, 0), 'Zero limit must throw.');
 rsThrows(static fn(): array => $service->getPage([], 50, -1), 'Negative offset must throw.');
 rsThrows(static fn(): array => $service->getPage(['date_from' => '2026-09-01', 'date_to' => '2026-08-01']), 'Reversed date range must throw.');
 
 $resolved = $service->resolveDivergence(2, 'admin@example.test', 'refunded', 'Manual financial correction', 'resolve-2');
-rsSameValue(true, $resolved['success'], 'Divergence resolution failed.');
-rsSameValue('paid', $resolved['old_status'], 'Resolution old status failed.');
-rsSameValue('refunded', $resolved['new_status'], 'Resolution new status failed.');
-rsSameValue(1, $paymentRepo->updateCalls, 'Payment status was not updated exactly once.');
-rsSameValue('refunded', $paymentRepo->updatedStatus, 'Payment status was not changed to the requested status.');
-rsSameValue(1, $auditRepo->resolutionCalls, 'Audit resolution was not recorded.');
-rsSameValue('resolve-2', $auditRepo->lastKey, 'Resolution idempotency key was not passed to audit repository.');
+rsSame(true, $resolved['success'], 'Divergence resolution failed.');
+rsSame('paid', $resolved['old_status'], 'Resolution old status failed.');
+rsSame('refunded', $resolved['new_status'], 'Resolution new status failed.');
+rsSame(1, $paymentRepo->updateCalls, 'Payment status was not updated exactly once.');
+rsSame('refunded', $paymentRepo->updatedStatus, 'Payment status was not changed to the requested status.');
+rsSame(1, $auditRepo->resolutionCalls, 'Audit resolution was not recorded.');
+rsSame('resolve-2', $auditRepo->lastKey, 'Resolution idempotency key was not passed to audit repository.');
 
 $second = $service->resolveDivergence(2, 'admin@example.test', 'refunded', 'Duplicate submission', 'resolve-2');
-rsSameValue(true, $second['idempotent'], 'Duplicate resolution was not treated as idempotent.');
-rsSameValue(1, $paymentRepo->updateCalls, 'Duplicate resolution changed status twice.');
-rsSameValue(1, $auditRepo->resolutionCalls, 'Duplicate resolution created a second audit event.');
+rsSame(true, $second['idempotent'], 'Duplicate resolution was not treated as idempotent.');
+rsSame(1, $paymentRepo->updateCalls, 'Duplicate resolution changed status twice.');
+rsSame(1, $auditRepo->resolutionCalls, 'Duplicate resolution created a second audit event.');
 
 rsThrows(static fn(): array => $service->resolveDivergence(3, 'admin@example.test', 'refunded', 'Status test', 'resolve-3'), 'Non-divergent resolution must be rejected.');
 rsThrows(static fn(): array => $service->resolveDivergence(2, '', 'refunded', 'Reason', 'resolve-4'), 'Empty actor must be rejected.');
