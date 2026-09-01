@@ -15,7 +15,7 @@ $pdo->exec(<<<'SQL'
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);
 CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock INTEGER);
 CREATE TABLE stock_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER, type TEXT, qty INTEGER, reason TEXT, user_id INTEGER);
-CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, customer_name TEXT, email TEXT, total REAL, status TEXT, payment_status TEXT, created_at TEXT);
+CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_name TEXT, email TEXT, total_amount REAL, status TEXT, payment_status TEXT, created_at TEXT);
 CREATE TABLE order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, product_id INTEGER, qty INTEGER, price REAL);
 CREATE TABLE order_status_history (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, from_status TEXT, to_status TEXT, actor_user_id INTEGER, note TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 SQL);
