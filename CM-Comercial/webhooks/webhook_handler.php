@@ -5,7 +5,6 @@ $container = require dirname(__DIR__) . '/bootstrap.php';
 
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\InvalidWebhookTransitionException;
-use App\Exceptions\WebhookConcurrencyException;
 use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Security\WebhookValidator;
@@ -18,6 +17,19 @@ $respond = static function (int $status, array $body): never {
     http_response_code($status);
     echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     exit;
+};
+
+$isInnoDbConcurrencyError = static function (Throwable $error): bool {
+    for ($current = $error; $current !== null; $current = $current->getPrevious()) {
+        $message = $current->getMessage();
+        $code = (int)$current->getCode();
+        $sqlState = $current instanceof PDOException ? (string)$current->errorInfo[0] ?? '' : '';
+        if ($code === 1213 || $code === 1205 || $sqlState === '40001' || str_contains($message, 'SQLSTATE[40001]')
+            || str_contains($message, 'Deadlock found') || str_contains($message, 'Lock wait timeout exceeded')) {
+            return true;
+        }
+    }
+    return false;
 };
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
@@ -106,9 +118,9 @@ try {
             return ['duplicate' => true];
         }
 
-        // The repository obtains a pessimistic InnoDB row lock while the enclosing
-        // transaction is active. All subsequent payment/order/stock writes remain
-        // in this same ACID boundary until the audit transaction commits.
+        // findByExternalReference(..., true) is the pessimistic lock acquisition.
+        // It executes SELECT ... FOR UPDATE on MySQL while this transaction owns
+        // the row lock, preventing concurrent state-machine decisions.
         $payment = $transactionRepository->findByExternalReference($externalReference, true);
         if ($payment === null) {
             throw new RuntimeException('Internal payment transaction not found.');
@@ -162,15 +174,18 @@ try {
 } catch (InvalidWebhookTransitionException $e) {
     error_log('[cm-comercial webhook state] invalid transition rejected');
     $respond(200, ['received' => true, 'idempotent' => true, 'state_rejected' => true]);
-} catch (WebhookConcurrencyException $e) {
-    // The transaction boundary has rolled back. Do not blindly retry because the
-    // gateway may deliver the same event again and idempotency will arbitrate it.
-    error_log('[cm-comercial webhook concurrency] transaction rolled back');
-    $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
-} catch (InvalidArgumentException $e) {
-    error_log('[cm-comercial webhook validation] ' . $e->getMessage());
-    $respond(422, ['received' => false, 'error' => 'invalid_payload']);
 } catch (Throwable $e) {
+    if ($isInnoDbConcurrencyError($e)) {
+        // The repository transaction wrapper has already rolled back. Never retry
+        // inside the request: the gateway can safely redeliver and idempotency will
+        // arbitrate the next attempt without duplicating side effects.
+        error_log('[cm-comercial webhook concurrency] InnoDB 1213/1205 handled after rollback');
+        $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
+    }
+    if ($e instanceof InvalidArgumentException) {
+        error_log('[cm-comercial webhook validation] ' . $e->getMessage());
+        $respond(422, ['received' => false, 'error' => 'invalid_payload']);
+    }
     error_log('[cm-comercial webhook] ' . $e->getMessage());
     $respond(500, ['received' => false, 'error' => 'processing_failed']);
 }
