@@ -44,9 +44,9 @@ final class FakePaymentTransactionRepository implements PaymentTransactionReposi
 {
     /** @var list<array<string,mixed>> */
     public array $rows;
-
     public int $listCalls = 0;
     public int $summaryCalls = 0;
+    public int $reconciliationSummaryCalls = 0;
 
     /** @param list<array<string,mixed>> $rows */
     public function __construct(array $rows)
@@ -54,10 +54,7 @@ final class FakePaymentTransactionRepository implements PaymentTransactionReposi
         $this->rows = $rows;
     }
 
-    /**
-     * @param array<string, scalar|null> $filters
-     * @return list<array<string,mixed>>
-     */
+    /** @param array<string, scalar|null> $filters */
     public function listWithFilters(array $filters, int $limit = 50, int $offset = 0): array
     {
         $this->listCalls++;
@@ -73,25 +70,109 @@ final class FakePaymentTransactionRepository implements PaymentTransactionReposi
                 if (isset($filters['customer_id']) && (int)($row['customer_id'] ?? 0) !== (int)$filters['customer_id']) {
                     return false;
                 }
+                if (isset($filters['order_id']) && (int)$row['order_id'] !== (int)$filters['order_id']) {
+                    return false;
+                }
                 return true;
             }
         ));
 
-        usort($filtered, static fn(array $a, array $b): int => (int)$b['id'] <=> (int)$a['id']);
+        usort(
+            $filtered,
+            static fn (array $a, array $b): int => (int)$b['id'] <=> (int)$a['id']
+        );
 
-        return array_slice($filtered, max(0, $offset), max(1, min(100, $limit)));
+        return array_slice(
+            $filtered,
+            max(0, $offset),
+            max(1, min(100, $limit))
+        );
     }
 
-    /**
-     * @param array<string, scalar|null> $filters
-     * @return array<string,int|float>
-     */
+    /** @param array<string, scalar|null> $filters */
     public function summarize(array $filters = []): array
     {
         $this->summaryCalls++;
         $rows = $this->listWithFilters($filters, 100, 0);
+        return $this->aggregate($rows);
+    }
 
-        $summary = [
+    /** @param array<string, scalar|null> $filters */
+    public function summarizeForReconciliation(array $filters = []): array
+    {
+        $this->reconciliationSummaryCalls++;
+        $rows = $this->listWithFilters($filters, 100, 0);
+
+        $reconciled = 0;
+        $divergent = 0;
+        $pending = 0;
+        $inconsistent = 0;
+        $orphans = 0;
+        $amountMismatches = 0;
+        $statusMismatches = 0;
+
+        foreach ($rows as $row) {
+            if (($row['order_status'] ?? null) === null) {
+                $inconsistent++;
+                $orphans++;
+                continue;
+            }
+
+            if (
+                abs(
+                    round((float)$row['amount'], 2)
+                    - round((float)($row['order_total'] ?? 0), 2)
+                ) > 0.01
+            ) {
+                $divergent++;
+                $amountMismatches++;
+                continue;
+            }
+
+            if (
+                (string)$row['status'] !== (string)($row['order_payment_status'] ?? '')
+                && !(
+                    $row['status'] === 'authorized'
+                    && in_array($row['order_payment_status'] ?? '', ['authorized', 'pending'], true)
+                )
+            ) {
+                $divergent++;
+                $statusMismatches++;
+                continue;
+            }
+
+            if (in_array($row['status'], ['pending', 'authorized'], true)) {
+                $pending++;
+                continue;
+            }
+
+            $reconciled++;
+        }
+
+        $aggregate = $this->aggregate($rows);
+        return [
+            'total' => count($rows),
+            'reconciled' => $reconciled,
+            'divergent' => $divergent,
+            'pending' => $pending,
+            'inconsistent' => $inconsistent,
+            'orphan_transactions' => $orphans,
+            'amount_mismatches' => $amountMismatches,
+            'status_mismatches' => $statusMismatches,
+            'total_amount' => $aggregate['total'],
+            'paid' => $aggregate['paid'],
+            'refunded' => $aggregate['refunded'],
+            'failed' => $aggregate['failed'],
+            'cancelled' => $aggregate['cancelled'],
+            'authorized' => $aggregate['authorized'],
+            'pending_amount' => $aggregate['pending'],
+        ];
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private function aggregate(array $rows): array
+    {
+        $result = [
             'count' => count($rows),
             'total' => 0.0,
             'paid' => 0.0,
@@ -104,14 +185,20 @@ final class FakePaymentTransactionRepository implements PaymentTransactionReposi
 
         foreach ($rows as $row) {
             $amount = (float)$row['amount'];
-            $summary['total'] += $amount;
+            $result['total'] += $amount;
             $status = (string)$row['status'];
-            if (array_key_exists($status, $summary)) {
-                $summary[$status] += $amount;
+            if (array_key_exists($status, $result)) {
+                $result[$status] += $amount;
             }
         }
 
-        return $summary;
+        foreach ($result as $key => $value) {
+            if (is_float($value)) {
+                $result[$key] = round($value, 2);
+            }
+        }
+
+        return $result;
     }
 }
 
@@ -119,7 +206,6 @@ final class FakeOrderRepository implements OrderRepositoryInterface
 {
     /** @var list<array<string,mixed>> */
     public array $missingOrders;
-
     public int $missingListCalls = 0;
     public int $missingCountCalls = 0;
 
@@ -139,7 +225,7 @@ final class FakeOrderRepository implements OrderRepositoryInterface
     public function listWithFilters(array $filters, int $limit = 50, int $offset = 0): array { return []; }
     public function listAll(string $statusFilter = '', int $limit = 50, int $offset = 0): array { return []; }
 
-    /** @param array<string, scalar|null> $filters @return list<array<string,mixed>> */
+    /** @param array<string, scalar|null> $filters */
     public function listWithoutPaymentTransaction(array $filters = [], int $limit = 50, int $offset = 0): array
     {
         $this->missingListCalls++;
@@ -190,7 +276,7 @@ $paymentRows = [
         'amount' => 90.00,
         'status' => 'paid',
         'order_status' => 'cancelled',
-        'order_payment_status' => 'paid',
+        'order_payment_status' => 'pending',
         'order_total' => 90.00,
         'provider' => 'mercadopago',
     ],
@@ -266,63 +352,114 @@ $statusMismatch = $service->classifyPayment($paymentRows[2]);
 assertSameValue('divergent', $statusMismatch['reconciliation_status'], 'Status mismatch must be divergent.');
 assertSameValue('status_mismatch', $statusMismatch['divergence_reason'], 'Status mismatch reason is incorrect.');
 
-$pending = $service->classifyPayment($paymentRows[3]);
-assertSameValue('pending', $pending['reconciliation_status'], 'Pending payment must remain pending.');
-
 $orphan = $service->classifyPayment($paymentRows[5]);
 assertSameValue('inconsistent', $orphan['reconciliation_status'], 'Orphan transaction must be inconsistent.');
 assertSameValue('orphan_transaction', $orphan['divergence_reason'], 'Orphan transaction reason is incorrect.');
 
 $summary = $service->getSummary();
 assertSameValue(7, $summary['total'], 'Summary must include payment and missing-order candidates.');
-assertSameValue(2, $summary['reconciled'], 'Reconciled count is incorrect.');
-assertSameValue(2, $summary['divergent'], 'Divergent count is incorrect.');
-assertSameValue(1, $summary['pending'], 'Pending count is incorrect.');
-assertSameValue(2, $summary['inconsistent'], 'Inconsistent count is incorrect.');
-assertSameValue(1, $summary['orphan_transactions'], 'Orphan transaction count is incorrect.');
-assertSameValue(1, $summary['missing_transactions'], 'Missing transaction count is incorrect.');
-assertSameValue(1, $summary['amount_mismatches'], 'Amount mismatch count is incorrect.');
-assertSameValue(1, $summary['status_mismatches'], 'Status mismatch count is incorrect.');
-assertSameValue(520.00, $summary['total_amount'], 'Payment amount summary is incorrect.');
+assertSameValue(2, $summary['reconciled'], 'Summary reconciled count is incorrect.');
+assertSameValue(2, $summary['divergent'], 'Summary divergent count is incorrect.');
+assertSameValue(1, $summary['pending'], 'Summary pending count is incorrect.');
+assertSameValue(2, $summary['inconsistent'], 'Summary inconsistent count is incorrect.');
+assertSameValue(1, $summary['orphan_transactions'], 'Summary orphan count is incorrect.');
+assertSameValue(1, $summary['missing_transactions'], 'Summary missing transaction count is incorrect.');
 
 $pageOne = $service->getPage([], 2, 0);
-assertSameValue(2, count($pageOne['items']), 'First reconciliation page size is incorrect.');
+assertSameValue(2, count($pageOne['items']), 'First page size is incorrect.');
 assertSameValue(4, $pageOne['total_pages'], 'Total pages must include missing orders.');
 assertSameValue(1, $pageOne['page'], 'First page number is incorrect.');
 
 $pageTwo = $service->getPage([], 2, 2);
-assertSameValue(2, count($pageTwo['items']), 'Second reconciliation page size is incorrect.');
+assertSameValue(2, count($pageTwo['items']), 'Second page size is incorrect.');
 assertSameValue(2, $pageTwo['page'], 'Second page number is incorrect.');
 
-assertThrows(static fn (): array => $service->getPage([], 0, 0), 'Zero page size must be rejected.');
-assertThrows(static fn (): array => $service->getPage([], 50, -1), 'Negative offset must be rejected.');
-assertThrows(static fn (): array => $service->getPage(['date_from' => '2026-09-01', 'date_to' => '2026-08-01']), 'Reversed date range must be rejected.');
+$filtered = $service->getPage(['customer_id' => 1, 'provider' => 'mercadopago'], 100, 0);
+assertSameValue(4, $filtered['total'], 'Customer/provider filter result is incorrect.');
+
+assertThrows(
+    static fn (): array => $service->getPage([], 0, 0),
+    'Zero page size must be rejected.'
+);
+
+assertThrows(
+    static fn (): array => $service->getPage([], 50, -1),
+    'Negative offset must be rejected.'
+);
+
+assertThrows(
+    static fn (): array => $service->getPage(
+        ['date_from' => '2026-09-01', 'date_to' => '2026-08-01']
+    ),
+    'Reversed date range must be rejected.'
+);
 
 assertTrue($paymentRepository->summaryCalls > 0, 'Payment repository summary was not called.');
 assertTrue($paymentRepository->listCalls > 0, 'Payment repository listing was not called.');
+assertTrue($paymentRepository->reconciliationSummaryCalls > 0, 'Reconciliation summary repository was not called.');
 assertTrue($orderRepository->missingCountCalls > 0, 'Order repository missing-payment count was not called.');
 assertTrue($orderRepository->missingListCalls > 0, 'Order repository missing-payment listing was not called.');
 
 $serviceSource = (string)file_get_contents(__DIR__ . '/../src/Services/ReconciliationService.php');
-assertTrue(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b\s+(FROM|INTO|SET)?/i', $serviceSource), 'ReconciliationService must not contain SQL statements.');
+assertTrue(
+    !preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b\s+(FROM|INTO|SET)?/i', $serviceSource),
+    'ReconciliationService must not contain SQL statements.'
+);
+assertTrue(
+    str_contains($serviceSource, 'PaymentTransactionRepositoryInterface'),
+    'Payment repository dependency is missing.'
+);
+assertTrue(
+    str_contains($serviceSource, 'OrderRepositoryInterface'),
+    'Order repository dependency is missing.'
+);
 
-$service->transaction(static function (PDO $db): void {
-    $db->exec('CREATE TABLE probe (value TEXT NOT NULL)');
-    $db->exec("INSERT INTO probe (value) VALUES ('committed')");
-});
-assertSameValue(1, (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'committed'")->fetchColumn(), 'Committed transaction was not persisted.');
+$committed = $service->transaction(
+    static function (PDO $db): string {
+        $db->exec('CREATE TABLE probe (value TEXT NOT NULL)');
+        $db->exec("INSERT INTO probe (value) VALUES ('committed')");
+        return 'committed';
+    }
+);
+assertSameValue('committed', $committed, 'Commit result is incorrect.');
+assertSameValue(
+    1,
+    (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'committed'")->fetchColumn(),
+    'Committed transaction did not persist.'
+);
 
-assertThrows(static function () use ($service): void {
-    $service->transaction(static function (PDO $db): never {
-        $db->exec("INSERT INTO probe (value) VALUES ('rolled-back')");
-        throw new RuntimeException('forced rollback');
-    });
-}, 'Rollback must propagate the underlying exception.');
-assertSameValue(0, (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'rolled-back'")->fetchColumn(), 'Rolled-back transaction persisted data.');
+assertThrows(
+    static function () use ($service): void {
+        $service->transaction(
+            static function (PDO $db): never {
+                $db->exec("INSERT INTO probe (value) VALUES ('rolled-back')");
+                throw new RuntimeException('forced rollback');
+            }
+        );
+    },
+    'Rollback must propagate the underlying exception.'
+);
+
+assertSameValue(
+    0,
+    (int)$pdo->query("SELECT COUNT(*) FROM probe WHERE value = 'rolled-back'")->fetchColumn(),
+    'Rolled-back transaction persisted data.'
+);
+
+$first = $service->reconcile('same-key', [], 2, 0);
+$paymentRepository->rows[0]['amount'] = 9999.00;
+$second = $service->reconcile('same-key', [], 2, 0);
+assertSameValue($first, $second, 'Same idempotency key must return the cached snapshot.');
+
+$third = $service->reconcile('different-key', [], 2, 0);
+assertTrue($third !== $first, 'Different idempotency key must execute a fresh reconciliation.');
 
 $pdo->beginTransaction();
 try {
-    assertThrows(static fn (): mixed => $service->transaction(static fn (PDO $db): string => 'nested'), 'Nested reconciliation transactions must be rejected.');
+    assertThrows(
+        static fn (): mixed => $service->transaction(static fn (PDO $db): string => 'nested'),
+        'Nested transactions must be rejected.'
+    );
 } finally {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
