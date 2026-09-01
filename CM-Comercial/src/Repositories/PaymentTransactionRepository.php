@@ -18,6 +18,16 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         'refunded',
     ];
 
+    /** @var array<string,list<string>> */
+    private const ALLOWED_TRANSITIONS = [
+        'pending' => ['authorized', 'paid', 'failed', 'cancelled'],
+        'authorized' => ['paid', 'failed', 'cancelled'],
+        'paid' => ['refunded'],
+        'failed' => [],
+        'cancelled' => [],
+        'refunded' => [],
+    ];
+
     public function __construct(private readonly PDO $db)
     {
     }
@@ -49,6 +59,35 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         }
     }
 
+    public function findByExternalReference(string $externalReference, bool $forUpdate = false): ?array
+    {
+        $externalReference = trim($externalReference);
+        if ($externalReference === '') {
+            return null;
+        }
+
+        $sql = 'SELECT p.*, o.status AS order_status, o.payment_status AS order_payment_status,
+                       o.total_amount AS order_total_amount, o.customer_id
+                FROM payment_transactions p
+                LEFT JOIN orders o ON o.id = p.order_id
+                WHERE p.external_reference = :external_reference
+                ORDER BY p.id DESC
+                LIMIT 1';
+        if ($forUpdate && $this->isMysql()) {
+            $sql .= ' FOR UPDATE';
+        }
+
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->bindValue(':external_reference', $externalReference, PDO::PARAM_STR);
+            $stmt->execute();
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return is_array($row) ? $row : null;
+        } catch (Throwable $e) {
+            throw new RuntimeException('Unable to resolve payment external reference.', 0, $e);
+        }
+    }
+
     public function updateStatus(int $id, string $status): bool
     {
         if ($id < 1 || !in_array($status, self::STATUSES, true)) {
@@ -63,6 +102,100 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
             return $stmt->rowCount() > 0;
         } catch (Throwable $e) {
             throw new RuntimeException('Unable to update payment transaction status.', 0, $e);
+        }
+    }
+
+    public function applyWebhookTransition(int $id, string $providerPaymentId, string $newStatus): array
+    {
+        if ($id < 1 || $providerPaymentId === '' || !in_array($newStatus, self::STATUSES, true)) {
+            throw new RuntimeException('Invalid webhook payment transition input.');
+        }
+
+        $payment = $this->findById($id, true);
+        if ($payment === null) {
+            throw new RuntimeException('Payment transaction not found.');
+        }
+
+        $oldStatus = (string)$payment['status'];
+        $orderId = (int)($payment['order_id'] ?? 0);
+        if ($orderId < 1) {
+            throw new RuntimeException('Payment transaction has no valid order.');
+        }
+
+        if ($oldStatus !== $newStatus && !in_array($newStatus, self::ALLOWED_TRANSITIONS[$oldStatus] ?? [], true)) {
+            throw new RuntimeException('Invalid payment state transition.');
+        }
+
+        if ($oldStatus !== $newStatus || (string)($payment['provider_payment_id'] ?? '') !== $providerPaymentId) {
+            $stmt = $this->db->prepare(
+                'UPDATE payment_transactions
+                 SET provider_payment_id = :provider_payment_id,
+                     status = :status,
+                     updated_at = CURRENT_TIMESTAMP(6)
+                 WHERE id = :id'
+            );
+            $stmt->execute([
+                ':provider_payment_id' => $providerPaymentId,
+                ':status' => $newStatus,
+                ':id' => $id,
+            ]);
+        }
+
+        if ($newStatus === 'paid' || $newStatus === 'authorized') {
+            $stmt = $this->db->prepare(
+                "UPDATE orders
+                 SET payment_status = :payment_status,
+                     status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
+                     updated_at = CURRENT_TIMESTAMP(6)
+                 WHERE id = :order_id"
+            );
+            $stmt->execute([':payment_status' => $newStatus, ':order_id' => $orderId]);
+        } elseif (in_array($newStatus, ['failed', 'cancelled'], true)
+            && !in_array($oldStatus, ['failed', 'cancelled', 'refunded'], true)) {
+            $this->restoreOrderStock($orderId);
+            $stmt = $this->db->prepare(
+                "UPDATE orders
+                 SET payment_status = :payment_status,
+                     status = CASE WHEN status <> 'delivered' THEN 'cancelled' ELSE status END,
+                     updated_at = CURRENT_TIMESTAMP(6)
+                 WHERE id = :order_id"
+            );
+            $stmt->execute([':payment_status' => $newStatus, ':order_id' => $orderId]);
+        } elseif ($newStatus === 'refunded'
+            && !in_array($oldStatus, ['cancelled', 'failed', 'refunded'], true)) {
+            $this->restoreOrderStock($orderId);
+            $stmt = $this->db->prepare(
+                'UPDATE orders SET payment_status = :payment_status, updated_at = CURRENT_TIMESTAMP(6) WHERE id = :order_id'
+            );
+            $stmt->execute([':payment_status' => $newStatus, ':order_id' => $orderId]);
+        }
+
+        return [
+            'transaction_id' => $id,
+            'order_id' => $orderId,
+            'old_status' => $oldStatus,
+            'new_status' => $newStatus,
+        ];
+    }
+
+    private function restoreOrderStock(int $orderId): void
+    {
+        $items = $this->db->prepare('SELECT product_id, quantity FROM order_items WHERE order_id = :order_id');
+        $items->execute([':order_id' => $orderId]);
+        $restore = $this->db->prepare(
+            'UPDATE products SET stock_quantity = stock_quantity + :quantity WHERE id = :product_id'
+        );
+
+        while ($item = $items->fetch(PDO::FETCH_ASSOC)) {
+            $quantity = (int)($item['quantity'] ?? 0);
+            $productId = (int)($item['product_id'] ?? 0);
+            if ($quantity < 1 || $productId < 1) {
+                throw new RuntimeException('Invalid order item while restoring stock.');
+            }
+            $restore->execute([':quantity' => $quantity, ':product_id' => $productId]);
+            if ($restore->rowCount() !== 1) {
+                throw new RuntimeException('Unable to restore product stock.');
+            }
         }
     }
 
@@ -208,10 +341,7 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         }
     }
 
-    /**
-     * @param array<string, scalar|null> $filters
-     * @return array<string,int|float>
-     */
+    /** @param array<string, scalar|null> $filters */
     public function summarizeForReconciliation(array $filters = []): array
     {
         [$conditions, $params] = $this->buildFilters($filters);
