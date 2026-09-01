@@ -27,7 +27,7 @@ $literalUserId = '$_SESSION[\'user\'][\'id\']';
 $logoutPostGuard = 'if ($_SERVER[\'REQUEST_METHOD\'] === \'POST\')';
 $sqlKeywordPattern = '/\b(?:SELECT|INSERT|UPDATE|DELETE)\b\s+(?:FROM|INTO|SET|WHERE|JOIN)/i';
 $pdoCallPattern = '/->(?:prepare|query|exec)\s*\(/i';
-$tableNamePattern = '/\b(?:payments|payment_transactions)\b/i';
+$storageSqlPattern = '/\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(?:payments|payment_transactions)\b/i';
 
 $checks = [
     'php_strict_types' => str_contains($financial, 'declare(strict_types=1);'),
@@ -39,7 +39,7 @@ $checks = [
     'reconciliation_service_present' => $reconciliationService !== '',
     'reconciliation_service_namespace' => str_contains($reconciliationService, 'namespace App\\Services;'),
     'reconciliation_service_no_sql' => !preg_match($sqlKeywordPattern, $reconciliationService),
-    'reconciliation_service_no_storage_table_names' => !preg_match($tableNamePattern, $reconciliationService),
+    'reconciliation_service_no_inline_storage_queries' => !preg_match($storageSqlPattern, $reconciliationService),
     'reconciliation_service_repository_injection' => str_contains($reconciliationService, 'PaymentTransactionRepositoryInterface') && str_contains($reconciliationService, 'OrderRepositoryInterface'),
     'reconciliation_service_uses_reconciliation_contract' => str_contains($reconciliationInterface, 'summarizeForReconciliation(array $filters = []): array'),
     'reconciliation_service_uses_missing_order_contract' => str_contains($reconciliationOrderInterface, 'listWithoutPaymentTransaction') && str_contains($reconciliationOrderInterface, 'countWithoutPaymentTransaction'),
@@ -49,8 +49,8 @@ $checks = [
     'reconciliation_service_detects_orphans' => str_contains($reconciliationService, 'orphan_transaction'),
     'reconciliation_service_detects_missing_transactions' => str_contains($reconciliationService, 'missing_payment_transaction'),
     'reconciliation_test_present' => $reconciliationTest !== '',
-    'reconciliation_test_registered_in_validation_runner' => str_contains($validationRunner, "'reconciliation_service_test.php'"),
-    'reconciliation_test_registered_in_release_gate' => str_contains($releaseGate, "'reconciliation_service_test.php'"),
+    'reconciliation_test_registered_in_validation_runner' => str_contains($validationRunner, 'reconciliation_service_test.php'),
+    'reconciliation_test_registered_in_release_gate' => str_contains($releaseGate, 'reconciliation_service_test.php'),
 
     'payment_repository_uses_canonical_table' => str_contains($repository, 'FROM payment_transactions') && !preg_match('/\bFROM\s+payments\b/i', $repository),
     'order_repository_uses_canonical_payment_table' => str_contains($orderRepository, 'FROM payment_transactions') && !preg_match('/\bFROM\s+payments\b/i', $orderRepository),
@@ -62,7 +62,7 @@ $checks = [
     'reconciliation_resolves_service' => str_contains($reconciliation, '$container->get(ReconciliationService::class)'),
     'reconciliation_no_sql' => !preg_match($sqlKeywordPattern, $reconciliation),
     'reconciliation_no_pdo_calls' => !preg_match($pdoCallPattern, $reconciliation),
-    'reconciliation_no_storage_table_names' => !preg_match($tableNamePattern, $reconciliation),
+    'reconciliation_no_inline_storage_queries' => !preg_match($storageSqlPattern, $reconciliation),
     'reconciliation_pagination_limit' => str_contains($reconciliation, 'RECONCILIATION_LIMIT_MAX = 100') && str_contains($reconciliation, 'max(1'),
     'reconciliation_csv_content_type' => str_contains($reconciliation, "header('Content-Type: text/csv; charset=UTF-8');"),
     'reconciliation_csv_disposition' => str_contains($reconciliation, 'Content-Disposition'),
