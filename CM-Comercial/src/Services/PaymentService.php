@@ -14,6 +14,23 @@ final class PaymentService
     {
     }
 
+    /**
+     * Retrieve the canonical provider representation used by the webhook entry point.
+     * The entry point never accesses the gateway directly; this keeps provider I/O
+     * behind the application service boundary.
+     *
+     * @return array<string,mixed>
+     */
+    public function getWebhookPayment(string $providerPaymentId): array
+    {
+        $providerPaymentId = trim($providerPaymentId);
+        if (!ctype_digit($providerPaymentId) || $providerPaymentId === '0') {
+            throw new InvalidArgumentException('Invalid provider payment id.');
+        }
+
+        return $this->gateway->getPayment($providerPaymentId);
+    }
+
     public function createPixOrder(?int $customerId, array $items, string $payerEmail, string $payerName, string $idempotencyKey, float $shippingAmount = 0.0): array
     {
         $this->validateInputs($items, $payerEmail, $idempotencyKey, $shippingAmount);
