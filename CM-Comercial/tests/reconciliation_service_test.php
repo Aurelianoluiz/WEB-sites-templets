@@ -218,16 +218,10 @@ final class FakeOrderRepository implements OrderRepositoryInterface
         $this->missingListCalls++;
         $rows = $this->missingOrders;
         if (isset($filters['customer_id'])) {
-            $rows = array_values(array_filter(
-                $rows,
-                static fn (array $row): bool => (int)($row['customer_id'] ?? 0) === (int)$filters['customer_id']
-            ));
+            $rows = array_values(array_filter($rows, static fn (array $row): bool => (int)($row['customer_id'] ?? 0) === (int)$filters['customer_id']));
         }
         if (isset($filters['order_id'])) {
-            $rows = array_values(array_filter(
-                $rows,
-                static fn (array $row): bool => (int)$row['id'] === (int)$filters['order_id']
-            ));
+            $rows = array_values(array_filter($rows, static fn (array $row): bool => (int)$row['id'] === (int)$filters['order_id']));
         }
         return array_slice($rows, max(0, $offset), max(1, min(100, $limit)));
     }
@@ -316,6 +310,10 @@ $payments->rows[0]['amount'] = 9999.00;
 $second = $service->reconcile('same-key', [], 2, 0);
 assertSameValue($first, $second, 'Duplicate reconciliation must be idempotent within the process.');
 
-assertThrows(static fn (): array => $service->getPage([], 1, 0), 'No exception expected for a normal page.');
+$serviceSource = (string)file_get_contents(__DIR__ . '/../src/Services/ReconciliationService.php');
+assertTrue(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b\s+(FROM|INTO|SET|WHERE)/i', $serviceSource), 'ReconciliationService must not contain SQL.');
+assertTrue(str_contains($serviceSource, 'beginTransaction'), 'Transaction boundary is missing.');
+assertTrue(str_contains($serviceSource, 'PaymentTransactionRepositoryInterface'), 'Payment repository dependency is missing.');
+assertTrue(str_contains($serviceSource, 'OrderRepositoryInterface'), 'Order repository dependency is missing.');
 
 echo "PASS: reconciliation_service_test\n";
