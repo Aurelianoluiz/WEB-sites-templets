@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
 
+use App\Exceptions\IdempotencyConflictException;
 use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Security\WebhookValidator;
@@ -48,9 +49,6 @@ try {
         throw new InvalidArgumentException('Invalid webhook event type.');
     }
 
-    // Mercado Pago documents the top-level notification id as the unique event id.
-    // The deterministic fallback keeps idempotency safe for legacy/simulated events
-    // that omit it without persisting the raw notification body.
     $notificationId = trim((string)($payload['id'] ?? ''));
     $idempotencyKey = $notificationId !== ''
         ? 'mp:webhook:' . $notificationId
@@ -102,7 +100,6 @@ try {
         $eventType,
         $safeContext
     ): array {
-        // Fast idempotency path. The unique index remains the final database guard.
         if ($auditRepository->isEventProcessed($idempotencyKey)) {
             return ['duplicate' => true];
         }
@@ -121,6 +118,9 @@ try {
         $oldStatus = (string)$payment['status'];
         $orderId = (int)$payment['order_id'];
 
+        // This is intentionally the first business write. If another request wins
+        // the UNIQUE idempotency race, IdempotencyConflictException aborts this
+        // transaction before payment/order/stock mutations can be committed.
         $auditId = $auditRepository->logEvent([
             'payment_transaction_id' => $transactionId,
             'event_type' => 'webhook.' . $eventType . '_updated',
@@ -134,8 +134,6 @@ try {
             ]),
         ]);
 
-        // A concurrent duplicate can return the existing audit id after the first
-        // transaction commits. Re-read the locked payment and avoid reapplying effects.
         $current = $transactionRepository->findByExternalReference($externalReference, true);
         if ($current === null) {
             throw new RuntimeException('Payment transaction disappeared during webhook processing.');
@@ -170,6 +168,11 @@ try {
         'received' => true,
         'idempotent' => (bool)($result['duplicate'] ?? false),
     ]);
+} catch (IdempotencyConflictException $e) {
+    // The transaction wrapper has already rolled back the losing request.
+    // Never expose database error details to the gateway/client.
+    error_log('[cm-comercial webhook idempotency] concurrent duplicate handled');
+    $respond(200, ['received' => true, 'idempotent' => true]);
 } catch (InvalidArgumentException $e) {
     error_log('[cm-comercial webhook validation] ' . $e->getMessage());
     $respond(422, ['received' => false, 'error' => 'invalid_payload']);
