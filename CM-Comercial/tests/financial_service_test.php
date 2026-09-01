@@ -50,22 +50,23 @@ CREATE TABLE users (
 );
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
-    user_id INTEGER NULL,
-    customer_name TEXT NOT NULL,
-    email TEXT NOT NULL,
+    customer_id INTEGER NULL,
     status TEXT NOT NULL,
     payment_status TEXT NOT NULL,
-    total REAL NOT NULL,
+    total_amount REAL NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE TABLE payments (
+CREATE TABLE payment_transactions (
     id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL,
-    amount REAL NOT NULL,
-    method TEXT NOT NULL,
-    status TEXT NOT NULL,
-    transaction_id TEXT NULL,
     provider TEXT NOT NULL,
+    provider_payment_id TEXT NULL,
+    external_reference TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    method TEXT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -79,30 +80,30 @@ $pdo->exec("INSERT INTO users (id, name, email) VALUES (1, 'Cliente Um', 'client
 $pdo->exec("INSERT INTO users (id, name, email) VALUES (2, 'Cliente Dois', 'cliente2@example.test')");
 
 $orderStatement = $pdo->prepare(
-    'INSERT INTO orders (id, user_id, customer_name, email, status, payment_status, total, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO orders (id, customer_id, status, payment_status, total_amount, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)'
 );
 foreach ([
-    [101, 1, 'Cliente Um', 'cliente1@example.test', 'confirmed', 'paid', 120.00, '2026-08-01 10:00:00'],
-    [102, 1, 'Cliente Um', 'cliente1@example.test', 'pending', 'pending', 80.00, '2026-08-02 10:00:00'],
-    [103, 1, 'Cliente Um', 'cliente1@example.test', 'cancelled', 'refunded', 50.00, '2026-08-03 10:00:00'],
-    [104, 1, 'Cliente Um', 'cliente1@example.test', 'confirmed', 'authorized', 75.00, '2026-08-04 10:00:00'],
-    [105, 2, 'Cliente Dois', 'cliente2@example.test', 'confirmed', 'paid', 999.00, '2026-08-05 10:00:00'],
+    [101, 1, 'confirmed', 'paid', 120.00, '2026-08-01 10:00:00'],
+    [102, 1, 'pending', 'pending', 80.00, '2026-08-02 10:00:00'],
+    [103, 1, 'cancelled', 'refunded', 50.00, '2026-08-03 10:00:00'],
+    [104, 1, 'confirmed', 'authorized', 75.00, '2026-08-04 10:00:00'],
+    [105, 2, 'confirmed', 'paid', 999.00, '2026-08-05 10:00:00'],
 ] as $order) {
     $orderStatement->execute($order);
 }
 
 $paymentStatement = $pdo->prepare(
-    'INSERT INTO payments
-        (id, order_id, amount, method, status, transaction_id, provider, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO payment_transactions
+        (id, order_id, provider, provider_payment_id, external_reference, idempotency_key, status, amount, currency, method, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 foreach ([
-    [201, 101, 120.00, 'pix', 'paid', 'mp-201', 'mercadopago', '2026-08-01 10:05:00', '2026-08-01 10:06:00'],
-    [202, 102, 80.00, 'pix', 'pending', null, 'mercadopago', '2026-08-02 10:05:00', '2026-08-02 10:05:00'],
-    [203, 103, 50.00, 'pix', 'refunded', 'mp-203', 'mercadopago', '2026-08-03 10:05:00', '2026-08-03 10:06:00'],
-    [204, 104, 75.00, 'credit_card', 'authorized', 'mp-204', 'mercadopago', '2026-08-04 10:05:00', '2026-08-04 10:06:00'],
-    [205, 105, 999.00, 'pix', 'paid', 'mp-205', 'mercadopago', '2026-08-05 10:05:00', '2026-08-05 10:06:00'],
+    [201, 101, 'mercadopago', 'mp-201', 'order-101', 'idem-201', 'paid', 120.00, 'BRL', 'pix', '2026-08-01 10:05:00', '2026-08-01 10:06:00'],
+    [202, 102, 'mercadopago', null, 'order-102', 'idem-202', 'pending', 80.00, 'BRL', 'pix', '2026-08-02 10:05:00', '2026-08-02 10:05:00'],
+    [203, 103, 'mercadopago', 'mp-203', 'order-103', 'idem-203', 'refunded', 50.00, 'BRL', 'pix', '2026-08-03 10:05:00', '2026-08-03 10:06:00'],
+    [204, 104, 'mercadopago', 'mp-204', 'order-104', 'idem-204', 'authorized', 75.00, 'BRL', 'credit_card', '2026-08-04 10:05:00', '2026-08-04 10:06:00'],
+    [205, 105, 'mercadopago', 'mp-205', 'order-105', 'idem-205', 'paid', 999.00, 'BRL', 'pix', '2026-08-05 10:05:00', '2026-08-05 10:06:00'],
 ] as $payment) {
     $paymentStatement->execute($payment);
 }
