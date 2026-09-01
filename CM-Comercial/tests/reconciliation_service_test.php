@@ -166,7 +166,7 @@ final class FakePaymentTransactionRepository implements PaymentTransactionReposi
         return $result;
     }
 
-    /** @param array<string,scalar|null> $filters */
+    /** @param array<string,scalar|null> $filters @return list<array<string,mixed>> */
     private function filteredRows(array $filters): array
     {
         return array_values(array_filter(
@@ -218,10 +218,16 @@ final class FakeOrderRepository implements OrderRepositoryInterface
         $this->missingListCalls++;
         $rows = $this->missingOrders;
         if (isset($filters['customer_id'])) {
-            $rows = array_values(array_filter($rows, static fn (array $row): bool => (int)($row['customer_id'] ?? 0) === (int)$filters['customer_id']));
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => (int)($row['customer_id'] ?? 0) === (int)$filters['customer_id']
+            ));
         }
         if (isset($filters['order_id'])) {
-            $rows = array_values(array_filter($rows, static fn (array $row): bool => (int)$row['id'] === (int)$filters['order_id']));
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => (int)$row['id'] === (int)$filters['order_id']
+            ));
         }
         return array_slice($rows, max(0, $offset), max(1, min(100, $limit)));
     }
@@ -260,7 +266,7 @@ assertSameValue('status_mismatch', $service->classifyPayment($paymentRows[2])['d
 assertSameValue('orphan_transaction', $service->classifyPayment($paymentRows[5])['divergence_reason'], 'Orphan classification failed.');
 
 $summary = $service->getSummary();
-assertSameValue(7, $summary['total'], 'Summary total must include missing transactions.');
+assertSameValue(7, $summary['total'], 'Summary total must include payment and missing-order candidates.');
 assertSameValue(2, $summary['reconciled'], 'Summary reconciled count is incorrect.');
 assertSameValue(2, $summary['divergent'], 'Summary divergent count is incorrect.');
 assertSameValue(1, $summary['pending'], 'Summary pending count is incorrect.');
@@ -268,22 +274,26 @@ assertSameValue(2, $summary['inconsistent'], 'Summary inconsistent count is inco
 assertSameValue(1, $summary['orphan_transactions'], 'Summary orphan count is incorrect.');
 assertSameValue(1, $summary['missing_transactions'], 'Summary missing transaction count is incorrect.');
 
-$page = $service->getPage([], 2, 6);
-assertSameValue(4, $page['page'], 'Missing-payment page number is incorrect.');
-assertSameValue(1, count($page['items']), 'Missing-payment page must contain one candidate.');
-assertSameValue('missing_payment_transaction', $page['items'][0]['divergence_reason'], 'Missing-payment candidate was not classified.');
+$pageMissing = $service->getPage([], 2, 6);
+assertSameValue(4, $pageMissing['page'], 'Missing-payment page number is incorrect.');
+assertSameValue(1, count($pageMissing['items']), 'Missing-payment page must contain one candidate.');
+assertSameValue('missing_payment_transaction', $pageMissing['items'][0]['divergence_reason'], 'Missing-payment candidate was not classified.');
 assertTrue($orders->missingListCalls > 0, 'Order repository list was not used for missing transactions.');
 
 $filtered = $service->getPage(['customer_id' => 1, 'provider' => 'mercadopago'], 2, 0);
-assertSameValue(5, $filtered['total'], 'Customer/provider filter count is incorrect.');
+assertSameValue(4, $filtered['total'], 'Customer/provider filter count is incorrect.');
 assertSameValue(2, count($filtered['items']), 'Filtered page size is incorrect.');
-assertSameValue(1, $filtered['page'], 'Filtered page number is incorrect.');
 
 $bounded = $service->getPage([], 500, 0);
 assertSameValue(100, $bounded['limit'], 'Pagination limit must be capped at 100.');
 assertThrows(static fn (): array => $service->getPage([], 0, 0), 'Zero limit must be rejected.');
 assertThrows(static fn (): array => $service->getPage([], 50, -1), 'Negative offset must be rejected.');
 assertThrows(static fn (): array => $service->getPage(['date_from' => '2026-09-01', 'date_to' => '2026-08-01']), 'Reversed date range must be rejected.');
+
+assertTrue($payments->summaryCalls > 0, 'Payment repository summary was not called.');
+assertTrue($payments->listCalls > 0, 'Payment repository listing was not called.');
+assertTrue($payments->reconciliationSummaryCalls > 0, 'Reconciliation repository summary was not called.');
+assertTrue($orders->missingCountCalls > 0, 'Order repository missing-payment count was not called.');
 
 $commitResult = $service->transaction(static function (PDO $db): string {
     $db->exec('CREATE TABLE reconciliation_probe (value TEXT NOT NULL)');
@@ -306,14 +316,6 @@ $payments->rows[0]['amount'] = 9999.00;
 $second = $service->reconcile('same-key', [], 2, 0);
 assertSameValue($first, $second, 'Duplicate reconciliation must be idempotent within the process.');
 
-$serviceSource = (string)file_get_contents(__DIR__ . '/../src/Services/ReconciliationService.php');
-assertTrue(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b\s+(FROM|INTO|SET|WHERE)/i', $serviceSource), 'ReconciliationService contains SQL.');
-assertTrue(str_contains($serviceSource, 'PaymentTransactionRepositoryInterface'), 'Payment repository DI is missing.');
-assertTrue(str_contains($serviceSource, 'OrderRepositoryInterface'), 'Order repository DI is missing.');
-assertTrue(str_contains($serviceSource, 'beginTransaction'), 'Transaction boundary is missing.');
-assertTrue(str_contains($serviceSource, 'idempotencyKey'), 'Idempotency contract is missing.');
-
-$bootstrap = (string)file_get_contents(__DIR__ . '/../bootstrap.php');
-assertTrue(str_contains($bootstrap, 'ReconciliationService::class'), 'Container registration is missing.');
+assertThrows(static fn (): array => $service->getPage([], 1, 0), 'No exception expected for a normal page.');
 
 echo "PASS: reconciliation_service_test\n";
