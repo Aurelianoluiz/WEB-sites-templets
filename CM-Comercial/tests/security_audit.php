@@ -16,6 +16,7 @@ $checkout = $read(__DIR__ . '/../includes/checkout_payment.php');
 $config = $read(__DIR__ . '/../config.php');
 $logout = $read(__DIR__ . '/../logout.php');
 $repository = $read(__DIR__ . '/../src/Repositories/PaymentTransactionRepository.php');
+$orderRepository = $read(__DIR__ . '/../src/Repositories/OrderRepository.php');
 $service = $read(__DIR__ . '/../src/Services/FinancialService.php');
 $bootstrap = $read(__DIR__ . '/../bootstrap.php');
 $reconciliationTest = $read(__DIR__ . '/reconciliation_service_test.php');
@@ -51,7 +52,10 @@ $checks = [
     'reconciliation_test_registered_in_validation_runner' => str_contains($validationRunner, "'reconciliation_service_test.php'"),
     'reconciliation_test_registered_in_release_gate' => str_contains($releaseGate, "'reconciliation_service_test.php'"),
 
+    'payment_repository_uses_canonical_table' => str_contains($repository, 'FROM payment_transactions') && !preg_match('/\bFROM\s+payments\b/i', $repository),
+    'order_repository_uses_canonical_payment_table' => str_contains($orderRepository, 'FROM payment_transactions') && !preg_match('/\bFROM\s+payments\b/i', $orderRepository),
     'bounded_pagination' => str_contains($service, 'MAX_PAGE_SIZE') && str_contains($repository, 'min(100'),
+
     'reconciliation_controller_present' => $reconciliation !== '',
     'reconciliation_view_present' => $reconciliationView !== '',
     'reconciliation_admin_guard' => str_contains($reconciliation, 'require_admin();'),
