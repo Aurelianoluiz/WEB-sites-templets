@@ -25,6 +25,7 @@ $webhookValidator = $read(__DIR__ . '/../src/Security/WebhookValidator.php');
 $paymentService = $read(__DIR__ . '/../src/Services/PaymentService.php');
 $webhookIntegrationTest = $read(__DIR__ . '/webhook_audit_integration_test.php');
 $webhookHttpIntegrationTest = $read(__DIR__ . '/webhook_http_integration_test.php');
+$webhookConcurrencyTest = $read(__DIR__ . '/webhook_concurrency_test.php');
 $reconciliationTest = $read(__DIR__ . '/reconciliation_repository_test.php');
 $reconciliationServiceTest = $read(__DIR__ . '/reconciliation_service_test.php');
 $paymentAuditTest = $read(__DIR__ . '/payment_audit_repository_test.php');
@@ -92,12 +93,21 @@ $checks = [
     'webhook_gateway_access_through_service' => str_contains($paymentService, 'getWebhookPayment('),
     'webhook_integration_test_present' => $webhookIntegrationTest !== '',
     'webhook_http_integration_test_present' => $webhookHttpIntegrationTest !== '',
+    'webhook_concurrency_test_present' => $webhookConcurrencyTest !== '',
     'webhook_http_uses_real_http_client' => str_contains($webhookHttpIntegrationTest, 'curl_init(') && str_contains($webhookHttpIntegrationTest, 'CURLOPT_POST'),
     'webhook_http_uses_real_builtin_server' => str_contains($webhookHttpIntegrationTest, "'-S'") && str_contains($webhookHttpIntegrationTest, 'proc_open('),
     'webhook_http_signature_coverage' => str_contains($webhookHttpIntegrationTest, 'hash_hmac(\'sha256\'') && str_contains($webhookHttpIntegrationTest, 'x-signature') && str_contains($webhookHttpIntegrationTest, 'x-request-id'),
     'webhook_http_replay_coverage' => str_contains($webhookHttpIntegrationTest, 'replayed webhook') && str_contains($webhookHttpIntegrationTest, 'idempotent'),
     'webhook_http_rollback_coverage' => str_contains($webhookHttpIntegrationTest, 'fail_webhook_transition') && str_contains($webhookHttpIntegrationTest, 'must rollback'),
     'webhook_http_sanitization_coverage' => str_contains($webhookHttpIntegrationTest, 'ACCESS-TOKEN') && str_contains($webhookHttpIntegrationTest, 'WEBHOOK-SECRET') && str_contains($webhookHttpIntegrationTest, 'PIX-QR'),
+    'webhook_concurrency_uses_curl_multi' => str_contains($webhookConcurrencyTest, 'curl_multi_init(') && str_contains($webhookConcurrencyTest, 'curl_multi_exec('),
+    'webhook_concurrency_uses_multiple_workers' => str_contains($webhookConcurrencyTest, 'PHP_CLI_SERVER_WORKERS') && str_contains($webhookConcurrencyTest, 'serverCount'),
+    'webhook_concurrency_same_notification_coverage' => str_contains($webhookConcurrencyTest, 'race-same-request') && str_contains($webhookConcurrencyTest, '910001'),
+    'webhook_concurrency_unique_audit_assertion' => str_contains($webhookConcurrencyTest, 'COUNT(*) FROM payment_audit_log') && str_contains($webhookConcurrencyTest, 'idempotency_key'),
+    'webhook_concurrency_transaction_lock_coverage' => str_contains($paymentRepository, 'findById($id, true)') && str_contains($paymentRepository, 'findByExternalReference($externalReference, true)'),
+    'webhook_concurrency_atomic_rollback_coverage' => str_contains($webhookConcurrencyTest, 'orphanAudit') && str_contains($webhookConcurrencyTest, 'rollback burst'),
+    'webhook_concurrency_registered_validation_runner' => str_contains($validationRunner, 'webhook_concurrency_test.php'),
+    'webhook_concurrency_registered_release_gate' => str_contains($releaseGate, 'webhook_concurrency_test.php'),
     'webhook_integration_test_registered' => str_contains($validationRunner, 'webhook_audit_integration_test.php') && str_contains($releaseGate, 'webhook_audit_integration_test.php'),
     'webhook_http_test_registered_validation_runner' => str_contains($validationRunner, 'webhook_http_integration_test.php'),
     'webhook_http_test_registered_release_gate' => str_contains($releaseGate, 'webhook_http_integration_test.php'),
