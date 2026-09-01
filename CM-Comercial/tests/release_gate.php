@@ -3,61 +3,10 @@ declare(strict_types=1);
 
 /** Release gate asset inventory for deterministic and environment-dependent validation. */
 $required = [
-    __DIR__ . '/payment_core_test.php',
-    __DIR__ . '/payment_service_test.php',
-    __DIR__ . '/payment_operations_test.php',
-    __DIR__ . '/payment_order_policy_test.php',
-    __DIR__ . '/refund_stock_policy_test.php',
-    __DIR__ . '/payment_immutability_test.php',
-    __DIR__ . '/payment_event_ownership_test.php',
-    __DIR__ . '/payment_event_duplicate_test.php',
-    __DIR__ . '/webhook_amount_validation_test.php',
-    __DIR__ . '/webhook_event_id_test.php',
-    __DIR__ . '/webhook_lifecycle_event_test.php',
-    __DIR__ . '/webhook_signature_freshness_test.php',
-    __DIR__ . '/webhook_signature_freshness_runtime_test.php',
-    __DIR__ . '/payment_event_type_validation_test.php',
-    __DIR__ . '/payment_event_record_validation_test.php',
-    __DIR__ . '/payment_transaction_identity_test.php',
-    __DIR__ . '/payment_order_atomicity_test.php',
-    __DIR__ . '/customer_financial_history_test.php',
-    __DIR__ . '/customer_identity_binding_test.php',
-    __DIR__ . '/csrf_test.php',
-    __DIR__ . '/authentication_security_test.php',
-    __DIR__ . '/access_control_test.php',
-    __DIR__ . '/logout_security_test.php',
-    __DIR__ . '/password_auth_audit.php',
-    __DIR__ . '/auth_surface_audit.php',
-    __DIR__ . '/security_audit.php',
-    __DIR__ . '/integration_suite.php',
-    __DIR__ . '/payment_consistency_test.php',
-    __DIR__ . '/stock_payment_idempotency_test.php',
-    __DIR__ . '/stock_payment_bridge_test.php',
-    __DIR__ . '/stock_reconciliation_test.php',
-    __DIR__ . '/stock_payment_policy_validation_test.php',
-    __DIR__ . '/payment_status_normalization_test.php',
-    __DIR__ . '/payment_status_normalization_runtime_test.php',
-    __DIR__ . '/mercadopago_status_validation_test.php',
-    __DIR__ . '/mercadopago_payment_input_validation_test.php',
-    __DIR__ . '/checkout_idempotency_scope_test.php',
-    __DIR__ . '/configuration_surface_test.php',
-    __DIR__ . '/order_service_test.php',
-    __DIR__ . '/admin_order_transition_test.php',
-    __DIR__ . '/financial_service_test.php',
-    __DIR__ . '/reconciliation_controller_test.php',
-    __DIR__ . '/payments_controller_test.php',
-    __DIR__ . '/reconciliation_service_test.php',
+    __DIR__ . '/payment_core_test.php',__DIR__ . '/payment_service_test.php',__DIR__ . '/payment_operations_test.php',__DIR__ . '/payment_order_policy_test.php',__DIR__ . '/refund_stock_policy_test.php',__DIR__ . '/payment_immutability_test.php',__DIR__ . '/payment_event_ownership_test.php',__DIR__ . '/payment_event_duplicate_test.php',__DIR__ . '/webhook_amount_validation_test.php',__DIR__ . '/webhook_event_id_test.php',__DIR__ . '/webhook_lifecycle_event_test.php',__DIR__ . '/webhook_signature_freshness_test.php',__DIR__ . '/webhook_signature_freshness_runtime_test.php',__DIR__ . '/payment_event_type_validation_test.php',__DIR__ . '/payment_event_record_validation_test.php',__DIR__ . '/payment_transaction_identity_test.php',__DIR__ . '/payment_order_atomicity_test.php',__DIR__ . '/customer_financial_history_test.php',__DIR__ . '/customer_identity_binding_test.php',__DIR__ . '/csrf_test.php',__DIR__ . '/authentication_security_test.php',__DIR__ . '/access_control_test.php',__DIR__ . '/logout_security_test.php',__DIR__ . '/password_auth_audit.php',__DIR__ . '/auth_surface_audit.php',__DIR__ . '/security_audit.php',__DIR__ . '/integration_suite.php',__DIR__ . '/payment_consistency_test.php',__DIR__ . '/stock_payment_idempotency_test.php',__DIR__ . '/stock_payment_bridge_test.php',__DIR__ . '/stock_reconciliation_test.php',__DIR__ . '/stock_payment_policy_validation_test.php',__DIR__ . '/payment_status_normalization_test.php',__DIR__ . '/payment_status_normalization_runtime_test.php',__DIR__ . '/mercadopago_status_validation_test.php',__DIR__ . '/mercadopago_payment_input_validation_test.php',__DIR__ . '/checkout_idempotency_scope_test.php',__DIR__ . '/configuration_surface_test.php',__DIR__ . '/order_service_test.php',__DIR__ . '/admin_order_transition_test.php',__DIR__ . '/financial_service_test.php',__DIR__ . '/reconciliation_controller_test.php',__DIR__ . '/payments_controller_test.php',__DIR__ . '/reconciliation_service_test.php',__DIR__ . '/reconciliation_repository_test.php',
 ];
-
 $missing = array_values(array_filter($required, static fn(string $path): bool => !is_file($path)));
-foreach ($required as $path) {
-    echo (is_file($path) ? 'READY' : 'MISSING') . ': ' . basename($path) . PHP_EOL;
-}
-
+foreach ($required as $path) echo (is_file($path) ? 'READY' : 'MISSING') . ': ' . basename($path) . PHP_EOL;
 echo "ENVIRONMENT_GATES: pending (database, HTTPS, gateway sandbox, webhook, E2E browser)\n";
-if ($missing !== []) {
-    fwrite(STDERR, 'FAIL: missing validation assets: ' . implode(', ', array_map('basename', $missing)) . PHP_EOL);
-    exit(1);
-}
-
+if ($missing !== []) { fwrite(STDERR, 'FAIL: missing validation assets: ' . implode(', ', array_map('basename', $missing)) . PHP_EOL); exit(1); }
 echo "RELEASE_GATE_ASSETS_READY\n";
