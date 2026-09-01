@@ -5,6 +5,10 @@ namespace App\Repositories;
 
 interface PaymentTransactionRepositoryInterface
 {
+    public function findById(int $id, bool $forUpdate = false): ?array;
+
+    public function updateStatus(int $id, string $status): bool;
+
     /** @param array<string, scalar|null> $filters */
     public function listWithFilters(array $filters, int $limit = 50, int $offset = 0): array;
 
