@@ -183,6 +183,7 @@ $rows = [
 $paymentTransactions = [
     2 => ['id' => 2, 'order_id' => 11, 'customer_id' => 1, 'amount' => 125.00, 'order_total_amount' => 100.00, 'status' => 'paid', 'order_status' => 'confirmed', 'order_payment_status' => 'pending'],
     3 => ['id' => 3, 'order_id' => 12, 'customer_id' => 1, 'amount' => 90.00, 'order_total_amount' => 90.00, 'status' => 'paid', 'order_status' => 'cancelled', 'order_payment_status' => 'paid'],
+    4 => ['id' => 4, 'order_id' => 13, 'customer_id' => 1, 'amount' => 75.00, 'order_total_amount' => 75.00, 'status' => 'pending', 'order_status' => 'pending', 'order_payment_status' => 'pending'],
 ];
 
 $reconciliationRepo = new FakeReconciliationRepository($rows);
@@ -217,7 +218,7 @@ rsSame(true, $second['idempotent'], 'Duplicate resolution was not treated as ide
 rsSame(1, $paymentRepo->updateCalls, 'Duplicate resolution changed status twice.');
 rsSame(1, $auditRepo->resolutionCalls, 'Duplicate resolution created a second audit event.');
 
-rsThrows(static fn(): array => $service->resolveDivergence(3, 'admin@example.test', 'refunded', 'Status test', 'resolve-3'), 'Non-divergent resolution must be rejected.');
+rsThrows(static fn(): array => $service->resolveDivergence(4, 'admin@example.test', 'refunded', 'Status test', 'resolve-3'), 'Non-divergent resolution must be rejected.');
 rsThrows(static fn(): array => $service->resolveDivergence(2, '', 'refunded', 'Reason', 'resolve-4'), 'Empty actor must be rejected.');
 rsThrows(static fn(): array => $service->resolveDivergence(2, 'admin@example.test', 'invalid', 'Reason', 'resolve-5'), 'Invalid new status must be rejected.');
 
