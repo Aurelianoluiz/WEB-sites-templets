@@ -13,6 +13,8 @@ use App\Repositories\PaymentTransactionRepository;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Repositories\ProductRepository;
 use App\Repositories\ProductRepositoryInterface;
+use App\Repositories\ReconciliationRepository;
+use App\Repositories\ReconciliationRepositoryInterface;
 use App\Security\CsrfManager;
 use App\Security\WebhookValidator;
 use App\Services\AdminOrderService;
@@ -38,29 +40,23 @@ $container->singleton(ProductRepository::class, static fn (Container $c): Produc
 $container->singleton(ProductRepositoryInterface::class, static fn (Container $c): ProductRepositoryInterface => $c->get(ProductRepository::class));
 $container->singleton(PaymentTransactionRepository::class, static fn (Container $c): PaymentTransactionRepository => new PaymentTransactionRepository($c->get(PDO::class)));
 $container->singleton(PaymentTransactionRepositoryInterface::class, static fn (Container $c): PaymentTransactionRepositoryInterface => $c->get(PaymentTransactionRepository::class));
+$container->singleton(ReconciliationRepository::class, static fn (Container $c): ReconciliationRepository => new ReconciliationRepository($c->get(PDO::class)));
+$container->singleton(ReconciliationRepositoryInterface::class, static fn (Container $c): ReconciliationRepositoryInterface => $c->get(ReconciliationRepository::class));
 
 $container->singleton(OrderService::class, static fn (Container $c): OrderService => new OrderService(
-    $c->get(PDO::class),
-    $c->get(OrderRepositoryInterface::class),
-    $c->get(ProductRepositoryInterface::class)
+    $c->get(PDO::class), $c->get(OrderRepositoryInterface::class), $c->get(ProductRepositoryInterface::class)
 ));
 $container->singleton(AdminOrderService::class, static fn (Container $c): AdminOrderService => new AdminOrderService(
-    $c->get(PDO::class),
-    $c->get(OrderRepositoryInterface::class),
-    $c->get(ProductRepositoryInterface::class)
+    $c->get(PDO::class), $c->get(OrderRepositoryInterface::class), $c->get(ProductRepositoryInterface::class)
 ));
 $container->singleton(FinancialService::class, static fn (Container $c): FinancialService => new FinancialService(
-    $c->get(PDO::class),
-    $c->get(PaymentTransactionRepositoryInterface::class)
+    $c->get(PDO::class), $c->get(PaymentTransactionRepositoryInterface::class)
 ));
 $container->singleton(ReconciliationService::class, static fn (Container $c): ReconciliationService => new ReconciliationService(
-    $c->get(PDO::class),
-    $c->get(PaymentTransactionRepositoryInterface::class),
-    $c->get(OrderRepositoryInterface::class)
+    $c->get(PDO::class), $c->get(ReconciliationRepositoryInterface::class)
 ));
 $container->singleton(PaymentService::class, static fn (Container $c): PaymentService => new PaymentService(
-    $c->get(Database::class),
-    $c->get(PaymentGatewayInterface::class)
+    $c->get(Database::class), $c->get(PaymentGatewayInterface::class)
 ));
 
 return $container;
