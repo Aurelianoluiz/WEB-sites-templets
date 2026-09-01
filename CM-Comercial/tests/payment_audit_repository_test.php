@@ -4,12 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use App\Repositories\PaymentAuditRepository;
-use InvalidArgumentException;
-use PDO;
-use RuntimeException;
-use Throwable;
 
-final class PaymentAuditRepositoryTestFailure extends RuntimeException {}
+final class PaymentAuditRepositoryTestFailure extends \RuntimeException {}
 
 function auditAssert(bool $condition, string $message): void
 {
@@ -31,14 +27,14 @@ function auditThrows(callable $callback, string $message): void
 {
     try {
         $callback();
-    } catch (Throwable) {
+    } catch (\Throwable) {
         return;
     }
     throw new PaymentAuditRepositoryTestFailure($message);
 }
 
-$pdo = new PDO('sqlite::memory:');
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo = new \PDO('sqlite::memory:');
+$pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 
 $pdo->exec(<<<'SQL'
 CREATE TABLE orders (
@@ -111,21 +107,13 @@ $duplicateId = $repository->logEvent([
     'idempotency_key' => 'event-100',
 ]);
 auditSame($id, $duplicateId, 'Idempotent event must return the original audit id.');
-
 auditSame(1, (int)$pdo->query("SELECT COUNT(*) FROM payment_audit_log WHERE idempotency_key = 'event-100'")->fetchColumn(), 'Duplicate idempotent event was inserted.');
 
-$resolution = $repository->logResolution(
-    100,
-    'admin@example.test',
-    'paid',
-    'refunded',
-    'Manual financial correction',
-    'resolve-100'
-);
+$resolution = $repository->logResolution(100, 'admin@example.test', 'paid', 'refunded', 'Manual financial correction', 'resolve-100');
 auditAssert($resolution, 'Resolution audit event failed.');
 
 auditSame(2, count($repository->getHistoryByTransactionId(100)), 'Transaction history count is incorrect.');
-auditSame(1, count($repository->getHistoryByOrderId(10)), 'Order history count is incorrect.');
+auditSame(2, count($repository->getHistoryByOrderId(10)), 'Order history count must include all events for its payment transaction.');
 auditSame(0, count($repository->getHistoryByOrderId(11)), 'Unrelated order history must be empty.');
 
 $history = $repository->getHistoryByTransactionId(100);
@@ -139,18 +127,9 @@ auditAssert(!str_contains($historyJson, 'event-100'), 'Idempotency key must not 
 $logs = $repository->listAuditLogs([], 100, 0);
 auditSame(2, count($logs), 'Audit log list count is incorrect.');
 
-auditThrows(
-    static fn(): int => $repository->logEvent(['event_type' => 'missing_transaction']),
-    'Missing transaction id must be rejected.'
-);
-auditThrows(
-    static fn(): bool => $repository->isEventProcessed(''),
-    'Empty idempotency keys must be rejected.'
-);
-auditThrows(
-    static fn(): array => $repository->listAuditLogs(['date_from' => '2026-09-02', 'date_to' => '2026-09-01'], 10, 0),
-    'Reversed audit date range must be rejected.'
-);
+auditThrows(static fn(): int => $repository->logEvent(['event_type' => 'missing_transaction']), 'Missing transaction id must be rejected.');
+auditThrows(static fn(): bool => $repository->isEventProcessed(''), 'Empty idempotency keys must be rejected.');
+auditThrows(static fn(): array => $repository->listAuditLogs(['date_from' => '2026-09-02', 'date_to' => '2026-09-01'], 10, 0), 'Reversed audit date range must be rejected.');
 
 $source = (string)file_get_contents(__DIR__ . '/../src/Repositories/PaymentAuditRepository.php');
 auditAssert((bool)preg_match('/->prepare\s*\(/', $source), 'PaymentAuditRepository must use prepared statements.');
