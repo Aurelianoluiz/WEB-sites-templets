@@ -26,7 +26,7 @@ final class OrderRepository implements OrderRepositoryInterface
             $sql = $this->appendForUpdate(
                 'SELECT o.*, u.name AS user_name, u.email AS user_email
                  FROM orders o
-                 LEFT JOIN users u ON u.id = o.user_id
+                 LEFT JOIN users u ON u.id = o.customer_id
                  WHERE o.id = ? LIMIT 1',
                 $forUpdate
             );
@@ -57,7 +57,7 @@ final class OrderRepository implements OrderRepositoryInterface
             $stmt = $this->db->prepare(
                 'SELECT o.*, u.name AS user_name, u.email AS user_email
                  FROM orders o
-                 LEFT JOIN users u ON u.id = o.user_id
+                 LEFT JOIN users u ON u.id = o.customer_id
                  WHERE o.idempotency_key = ? LIMIT 1'
             );
             $stmt->execute([$ref]);
@@ -74,8 +74,8 @@ final class OrderRepository implements OrderRepositoryInterface
             $sql = $this->appendForUpdate(
                 'SELECT o.*, u.name AS user_name, u.email AS user_email
                  FROM orders o
-                 INNER JOIN users u ON u.id = o.user_id
-                 WHERE o.id = ? AND o.user_id = ? LIMIT 1',
+                 INNER JOIN users u ON u.id = o.customer_id
+                 WHERE o.id = ? AND o.customer_id = ? LIMIT 1',
                 $forUpdate
             );
             $stmt = $this->db->prepare($sql);
@@ -94,7 +94,7 @@ final class OrderRepository implements OrderRepositoryInterface
 
         try {
             $stmt = $this->db->prepare(
-                'SELECT o.* FROM orders o WHERE o.user_id = ? ORDER BY o.id DESC LIMIT ? OFFSET ?'
+                'SELECT o.* FROM orders o WHERE o.customer_id = ? ORDER BY o.id DESC LIMIT ? OFFSET ?'
             );
             $stmt->bindValue(1, $userId, PDO::PARAM_INT);
             $stmt->bindValue(2, $limit, PDO::PARAM_INT);
@@ -170,18 +170,20 @@ final class OrderRepository implements OrderRepositoryInterface
             $params[] = $filters['payment_status'];
         }
         if (isset($filters['user_id']) && is_numeric($filters['user_id'])) {
-            $conditions[] = 'o.user_id = ?';
+            $conditions[] = 'o.customer_id = ?';
             $params[] = (int)$filters['user_id'];
         }
         if (isset($filters['search']) && is_string($filters['search']) && trim($filters['search']) !== '') {
-            $conditions[] = '(o.customer_name LIKE ? OR o.email LIKE ? OR CAST(o.id AS CHAR) LIKE ?)';
+            $conditions[] = '(u.name LIKE ? OR u.email LIKE ? OR CAST(o.id AS CHAR) LIKE ?)';
             $term = '%' . trim($filters['search']) . '%';
             $params[] = $term;
             $params[] = $term;
             $params[] = $term;
         }
 
-        $sql = 'SELECT o.*, u.email AS user_email FROM orders o LEFT JOIN users u ON u.id = o.user_id';
+        $sql = 'SELECT o.*, u.name AS customer_name, u.email AS user_email
+                FROM orders o
+                LEFT JOIN users u ON u.id = o.customer_id';
         if ($conditions !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $conditions);
         }
@@ -207,11 +209,7 @@ final class OrderRepository implements OrderRepositoryInterface
         return $this->listWithFilters($statusFilter === '' ? [] : ['status' => $statusFilter], $limit, $offset);
     }
 
-    /**
-     * Returns orders that do not have a corresponding payment transaction.
-     * @param array<string, scalar|null> $filters
-     * @return list<array<string,mixed>>
-     */
+    /** @param array<string, scalar|null> $filters */
     public function listWithoutPaymentTransaction(array $filters = [], int $limit = 50, int $offset = 0): array
     {
         $limit = max(1, min(100, $limit));
@@ -220,8 +218,10 @@ final class OrderRepository implements OrderRepositoryInterface
 
         $sql = 'SELECT o.*, u.name AS user_name, u.email AS user_email
                 FROM orders o
-                LEFT JOIN users u ON u.id = o.user_id
-                WHERE NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id)';
+                LEFT JOIN users u ON u.id = o.customer_id
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM payment_transactions p WHERE p.order_id = o.id
+                )';
         if ($where !== '') {
             $sql .= ' AND ' . $where;
         }
@@ -247,7 +247,9 @@ final class OrderRepository implements OrderRepositoryInterface
     {
         [$where, $params] = $this->buildMissingPaymentFilters($filters);
         $sql = 'SELECT COUNT(*) FROM orders o
-                WHERE NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id)';
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM payment_transactions p WHERE p.order_id = o.id
+                )';
         if ($where !== '') {
             $sql .= ' AND ' . $where;
         }
@@ -279,8 +281,12 @@ final class OrderRepository implements OrderRepositoryInterface
             $params[] = $filters['payment_status'];
         }
         if (isset($filters['user_id']) && is_numeric($filters['user_id']) && (int)$filters['user_id'] > 0) {
-            $where[] = 'o.user_id = ?';
+            $where[] = 'o.customer_id = ?';
             $params[] = (int)$filters['user_id'];
+        }
+        if (isset($filters['customer_id']) && is_numeric($filters['customer_id']) && (int)$filters['customer_id'] > 0) {
+            $where[] = 'o.customer_id = ?';
+            $params[] = (int)$filters['customer_id'];
         }
         if (isset($filters['order_id']) && is_numeric($filters['order_id']) && (int)$filters['order_id'] > 0) {
             $where[] = 'o.id = ?';
@@ -296,7 +302,7 @@ final class OrderRepository implements OrderRepositoryInterface
         }
         if (isset($filters['search']) && is_string($filters['search']) && trim($filters['search']) !== '') {
             $term = '%' . trim($filters['search']) . '%';
-            $where[] = '(o.customer_name LIKE ? OR o.email LIKE ? OR CAST(o.id AS CHAR) LIKE ?)';
+            $where[] = '(u.name LIKE ? OR u.email LIKE ? OR CAST(o.id AS CHAR) LIKE ?)';
             $params[] = $term;
             $params[] = $term;
             $params[] = $term;
