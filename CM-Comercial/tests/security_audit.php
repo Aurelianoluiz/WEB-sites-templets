@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+$pdo = '$pdo';
 $read = static fn(string $path): string => is_file($path) ? (string)file_get_contents($path) : '';
 $financial = $read(__DIR__ . '/../financial_history.php');
 $customer = $read(__DIR__ . '/../customer_financial_history.php');
@@ -97,8 +98,8 @@ $checks = [
     'webhook_concurrency_test_present' => $webhookConcurrencyTest !== '',
     'webhook_mysql_concurrency_test_present' => $webhookMysqlConcurrencyTest !== '',
     'webhook_mysql_concurrency_requires_pdo_mysql' => str_contains($webhookMysqlConcurrencyTest, "extension_loaded('pdo_mysql')"),
-    'webhook_mysql_concurrency_requires_mysql8' => str_contains($webhookMysqlConcurrencyTest, "preg_match('/^8\\./", $webhookMysqlConcurrencyTest),
-    'webhook_mysql_concurrency_requires_innodb' => str_contains($webhookMysqlConcurrencyTest, "tableEngine($pdo, 'payment_transactions') === 'innodb'") && str_contains($webhookMysqlConcurrencyTest, "tableEngine($pdo, 'payment_audit_log') === 'innodb'"),
+    'webhook_mysql_concurrency_requires_mysql8' => str_contains($webhookMysqlConcurrencyTest, "preg_match('/^8\\./"),
+    'webhook_mysql_concurrency_requires_innodb' => str_contains($webhookMysqlConcurrencyTest, 'tableEngine($pdo, \'payment_transactions\') === \'innodb\'') && str_contains($webhookMysqlConcurrencyTest, 'tableEngine($pdo, \'payment_audit_log\') === \'innodb\''),
     'webhook_mysql_concurrency_unique_audit_index' => str_contains($webhookMysqlConcurrencyTest, 'uniqueIdempotencyIndexExists') && str_contains($webhookMysqlConcurrencyTest, 'Non_unique'),
     'webhook_mysql_concurrency_for_update_probe' => str_contains($webhookMysqlConcurrencyTest, 'FOR UPDATE') && str_contains($webhookMysqlConcurrencyTest, 'lockElapsed'),
     'webhook_mysql_concurrency_32_plus_requests' => str_contains($webhookMysqlConcurrencyTest, 'max(32,') && str_contains($webhookMysqlConcurrencyTest, 'curl_multi_init('),
