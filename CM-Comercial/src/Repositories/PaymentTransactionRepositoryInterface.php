@@ -11,12 +11,11 @@ interface PaymentTransactionRepositoryInterface
     /** @param array<string, scalar|null> $filters */
     public function summarize(array $filters = []): array;
 
-    /** @param array<string, scalar|null> $filters */
-    public function listReconciliationCandidates(array $filters = [], int $limit = 50, int $offset = 0): array;
-
-    /** @param array<string, scalar|null> $filters */
-    public function countReconciliationCandidates(array $filters = []): int;
-
-    /** @param array<string, scalar|null> $filters */
-    public function summarizeReconciliation(array $filters = []): array;
+    /**
+     * Returns reconciliation-oriented aggregate counts for persisted payment
+     * transactions matched against their orders.
+     *
+     * @param array<string, scalar|null> $filters
+     */
+    public function summarizeForReconciliation(array $filters = []): array;
 }
