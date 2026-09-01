@@ -96,10 +96,13 @@ CREATE TABLE IF NOT EXISTS payment_audit_log (
     old_status VARCHAR(30) NULL,
     new_status VARCHAR(30) NULL,
     actor VARCHAR(100) NOT NULL DEFAULT 'system',
+    idempotency_key VARCHAR(255) NULL,
     payload JSON NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
+    UNIQUE KEY uq_payment_audit_idempotency (idempotency_key),
     KEY idx_payment_audit_payment (payment_transaction_id, created_at),
+    KEY idx_payment_audit_actor (actor, created_at),
     CONSTRAINT fk_payment_audit_payment FOREIGN KEY (payment_transaction_id) REFERENCES payment_transactions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
