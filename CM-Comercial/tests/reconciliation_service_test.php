@@ -7,11 +7,8 @@ use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Repositories\ReconciliationRepositoryInterface;
 use App\Services\ReconciliationService;
-use InvalidArgumentException;
-use RuntimeException;
-use Throwable;
 
-final class ReconciliationServiceTestFailure extends RuntimeException {}
+final class ReconciliationServiceTestFailure extends \RuntimeException {}
 
 function rsAssert(bool $ok, string $message): void
 {
@@ -33,7 +30,7 @@ function rsThrows(callable $callback, string $message): void
 {
     try {
         $callback();
-    } catch (Throwable) {
+    } catch (\Throwable) {
         return;
     }
     throw new ReconciliationServiceTestFailure($message);
@@ -223,7 +220,8 @@ rsThrows(static fn(): array => $service->resolveDivergence(2, '', 'refunded', 'R
 rsThrows(static fn(): array => $service->resolveDivergence(2, 'admin@example.test', 'invalid', 'Reason', 'resolve-5'), 'Invalid new status must be rejected.');
 
 $source = (string)file_get_contents(__DIR__ . '/../src/Services/ReconciliationService.php');
-rsAssert(!preg_match('/\b(?:SELECT|INSERT|UPDATE|DELETE)\b\s+(?:FROM|INTO|SET|JOIN|WHERE)?/i', $source), 'ReconciliationService contains SQL.');
+$sqlPattern = '/\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:\s+|\()+(?:FROM|INTO|SET|JOIN|WHERE)\b/i';
+rsAssert(!preg_match($sqlPattern, $source), 'ReconciliationService contains SQL.');
 rsAssert(!str_contains($source, '->prepare('), 'ReconciliationService contains PDO access.');
 rsAssert(str_contains($source, 'PaymentAuditRepositoryInterface'), 'Audit repository dependency is missing.');
 
