@@ -5,10 +5,12 @@ require_once __DIR__ . '/../config.php';
 $container = require __DIR__ . '/../bootstrap.php';
 
 use App\Services\ReconciliationService;
+use Throwable;
 
 require_admin();
 
 const RECONCILIATION_LIMIT_MAX = 100;
+const RECONCILIATION_LIMIT_DEFAULT = 50;
 
 $statusLabels = [
     'pending' => 'Pendente',
@@ -37,41 +39,74 @@ foreach (['customer_id', 'order_id'] as $key) {
 $page = max(1, (int)($_GET['page'] ?? 1));
 $limit = min(
     RECONCILIATION_LIMIT_MAX,
-    max(1, (int)($_GET['limit'] ?? 50))
+    max(1, (int)($_GET['limit'] ?? RECONCILIATION_LIMIT_DEFAULT))
 );
+$offset = ($page - 1) * $limit;
 
 $reconciliationService = $container->get(ReconciliationService::class);
 $error = null;
-$summary = [];
+$summary = [
+    'total' => 0,
+    'payment_transactions' => 0,
+    'reconciled' => 0,
+    'divergent' => 0,
+    'pending' => 0,
+    'inconsistent' => 0,
+    'orphan_transactions' => 0,
+    'missing_transactions' => 0,
+    'amount_mismatches' => 0,
+    'status_mismatches' => 0,
+    'total_amount' => 0.0,
+    'paid_amount' => 0.0,
+    'refunded_amount' => 0.0,
+    'pending_amount' => 0.0,
+    'failed_amount' => 0.0,
+    'cancelled_amount' => 0.0,
+    'authorized_amount' => 0.0,
+];
 $payments = [];
 $total = 0;
 $totalPages = 1;
-$offset = 0;
 
 try {
-    $summary = $reconciliationService->getSummary($filters);
-    $total = (int)($summary['total'] ?? 0);
-    $totalPages = max(1, (int)ceil($total / $limit));
-    $page = min($page, $totalPages);
-    $offset = ($page - 1) * $limit;
+    $idempotencyKey = hash(
+        'sha256',
+        json_encode(
+            [
+                'filters' => $filters,
+                'page' => $page,
+                'limit' => $limit,
+            ],
+            JSON_THROW_ON_ERROR
+        )
+    );
 
-    $result = $reconciliationService->getPage(
+    $snapshot = $reconciliationService->reconcile(
+        $idempotencyKey,
         $filters,
         $limit,
         $offset
     );
 
-    $payments = $result['items'];
-    $page = $result['page'];
-    $offset = $result['offset'];
-} catch (\Throwable $e) {
-    http_response_code(400);
-    $error = $e->getMessage();
+    $summary = $snapshot['summary'];
+    $payments = $snapshot['page']['items'];
+    $total = $snapshot['page']['total'];
+    $totalPages = $snapshot['page']['total_pages'];
+    $page = $snapshot['page']['page'];
+    $offset = $snapshot['page']['offset'];
+} catch (Throwable $e) {
+    http_response_code($e instanceof \InvalidArgumentException ? 400 : 500);
+    $error = 'Não foi possível carregar a conciliação financeira.';
 }
 
 if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
     try {
-        $exportResult = $reconciliationService->getPage(
+        $exportKey = hash(
+            'sha256',
+            $idempotencyKey . ':export'
+        );
+        $export = $reconciliationService->reconcile(
+            $exportKey,
             $filters,
             RECONCILIATION_LIMIT_MAX,
             0
@@ -81,6 +116,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
         header('Content-Disposition: attachment; filename="cm-comercial-reconciliation.csv"');
         header('Cache-Control: no-store, no-cache, must-revalidate');
         header('Pragma: no-cache');
+        header('X-Content-Type-Options: nosniff');
 
         $output = fopen('php://output', 'wb');
         if ($output === false) {
@@ -90,7 +126,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
         $csvSafe = static function (mixed $value): string {
             $text = is_scalar($value) || $value === null ? (string)$value : '';
             if ($text !== '' && in_array($text[0], ['=', '+', '-', '@'], true)) {
-                $text = "'" . $text;
+                return "'" . $text;
             }
             return $text;
         };
@@ -109,7 +145,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
             'updated_at',
         ]);
 
-        foreach ($exportResult['items'] as $row) {
+        foreach ($export['page']['items'] as $row) {
             fputcsv($output, [
                 $csvSafe($row['id'] ?? ''),
                 $csvSafe($row['order_id'] ?? ''),
@@ -127,14 +163,14 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
 
         fclose($output);
         exit;
-    } catch (\Throwable $e) {
+    } catch (Throwable) {
         http_response_code(500);
         $error = 'Unable to export reconciliation data.';
     }
 }
 
 $queryFilters = array_filter(
-    $filters,
+    array_merge($filters, ['limit' => $limit]),
     static fn (mixed $value): bool => $value !== '' && $value !== null
 );
 
