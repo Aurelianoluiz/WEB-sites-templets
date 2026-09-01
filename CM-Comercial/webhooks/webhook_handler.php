@@ -4,6 +4,8 @@ declare(strict_types=1);
 $container = require dirname(__DIR__) . '/bootstrap.php';
 
 use App\Exceptions\IdempotencyConflictException;
+use App\Exceptions\InvalidWebhookTransitionException;
+use App\Exceptions\WebhookConcurrencyException;
 use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Security\WebhookValidator;
@@ -104,6 +106,9 @@ try {
             return ['duplicate' => true];
         }
 
+        // The repository obtains a pessimistic InnoDB row lock while the enclosing
+        // transaction is active. All subsequent payment/order/stock writes remain
+        // in this same ACID boundary until the audit transaction commits.
         $payment = $transactionRepository->findByExternalReference($externalReference, true);
         if ($payment === null) {
             throw new RuntimeException('Internal payment transaction not found.');
@@ -118,9 +123,6 @@ try {
         $oldStatus = (string)$payment['status'];
         $orderId = (int)$payment['order_id'];
 
-        // This is intentionally the first business write. If another request wins
-        // the UNIQUE idempotency race, IdempotencyConflictException aborts this
-        // transaction before payment/order/stock mutations can be committed.
         $auditId = $auditRepository->logEvent([
             'payment_transaction_id' => $transactionId,
             'event_type' => 'webhook.' . $eventType . '_updated',
@@ -133,20 +135,6 @@ try {
                 'order_id' => $orderId,
             ]),
         ]);
-
-        $current = $transactionRepository->findByExternalReference($externalReference, true);
-        if ($current === null) {
-            throw new RuntimeException('Payment transaction disappeared during webhook processing.');
-        }
-
-        if ((string)$current['status'] === $gatewayStatus) {
-            return [
-                'duplicate' => true,
-                'transaction_id' => $transactionId,
-                'order_id' => $orderId,
-                'audit_id' => $auditId,
-            ];
-        }
 
         $transition = $transactionRepository->applyWebhookTransition(
             $transactionId,
@@ -169,10 +157,16 @@ try {
         'idempotent' => (bool)($result['duplicate'] ?? false),
     ]);
 } catch (IdempotencyConflictException $e) {
-    // The transaction wrapper has already rolled back the losing request.
-    // Never expose database error details to the gateway/client.
     error_log('[cm-comercial webhook idempotency] concurrent duplicate handled');
     $respond(200, ['received' => true, 'idempotent' => true]);
+} catch (InvalidWebhookTransitionException $e) {
+    error_log('[cm-comercial webhook state] invalid transition rejected');
+    $respond(200, ['received' => true, 'idempotent' => true, 'state_rejected' => true]);
+} catch (WebhookConcurrencyException $e) {
+    // The transaction boundary has rolled back. Do not blindly retry because the
+    // gateway may deliver the same event again and idempotency will arbitrate it.
+    error_log('[cm-comercial webhook concurrency] transaction rolled back');
+    $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
 } catch (InvalidArgumentException $e) {
     error_log('[cm-comercial webhook validation] ' . $e->getMessage());
     $respond(422, ['received' => false, 'error' => 'invalid_payload']);
