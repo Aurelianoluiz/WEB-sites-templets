@@ -15,6 +15,7 @@ $config = $read(__DIR__ . '/../config.php');
 $logout = $read(__DIR__ . '/../logout.php');
 $repository = $read(__DIR__ . '/../src/Repositories/PaymentTransactionRepository.php');
 $service = $read(__DIR__ . '/../src/Services/FinancialService.php');
+$bootstrap = $read(__DIR__ . '/../bootstrap.php');
 
 $literalUserId = '$_SESSION[\'user\'][\'id\']';
 $logoutPostGuard = 'if ($_SERVER[\'REQUEST_METHOD\'] === \'POST\')';
@@ -31,6 +32,11 @@ $checks = [
     'reconciliation_service_namespace' => str_contains($reconciliationService, 'namespace App\\Services;'),
     'reconciliation_service_no_sql' => !preg_match($sqlKeywordPattern, $reconciliationService),
     'reconciliation_service_repository_injection' => str_contains($reconciliationService, 'PaymentTransactionRepositoryInterface') && str_contains($reconciliationService, 'OrderRepositoryInterface'),
+    'reconciliation_service_has_idempotency' => str_contains($reconciliationService, 'idempotencyKey') && str_contains($reconciliationService, '$idempotencyCache'),
+    'reconciliation_service_has_transaction_boundary' => str_contains($reconciliationService, '$this->db->beginTransaction()') && str_contains($reconciliationService, '$this->db->commit()') && str_contains($reconciliationService, '$this->db->rollBack()'),
+    'reconciliation_service_classification_states' => str_contains($reconciliationService, "'reconciled'") && str_contains($reconciliationService, "'divergent'") && str_contains($reconciliationService, "'pending'") && str_contains($reconciliationService, "'inconsistent'"),
+    'reconciliation_service_detects_orphans' => str_contains($reconciliationService, 'orphan_transaction'),
+    'reconciliation_service_detects_missing_transactions' => str_contains($reconciliationService, 'missing_payment_transaction'),
     'bounded_pagination' => str_contains($service, 'MAX_PAGE_SIZE') && str_contains($repository, 'min(100'),
     'reconciliation_controller_present' => $reconciliation !== '',
     'reconciliation_view_present' => $reconciliationView !== '',
@@ -45,6 +51,7 @@ $checks = [
     'reconciliation_csv_allow_list' => str_contains($reconciliation, "'transaction_id'") && str_contains($reconciliation, "'customer'") && str_contains($reconciliation, "'amount'"),
     'reconciliation_no_sensitive_export' => !str_contains($reconciliation, 'payload') && !str_contains($reconciliation, 'access_token') && !str_contains($reconciliation, 'webhook_secret') && !str_contains($reconciliation, 'qr_code_base64'),
     'reconciliation_view_no_sql' => !preg_match($sqlKeywordPattern, $reconciliationView) && !preg_match($pdoCallPattern, $reconciliationView),
+    'reconciliation_registered_in_bootstrap' => str_contains($bootstrap, 'ReconciliationService::class') && str_contains($bootstrap, 'new ReconciliationService'),
     'payments_controller_present' => $paymentsController !== '',
     'payments_view_present' => $paymentsView !== '',
     'payments_admin_guard' => str_contains($paymentsController, 'require_admin();'),
