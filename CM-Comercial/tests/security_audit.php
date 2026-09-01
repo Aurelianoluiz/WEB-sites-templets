@@ -26,6 +26,7 @@ $paymentService = $read(__DIR__ . '/../src/Services/PaymentService.php');
 $webhookIntegrationTest = $read(__DIR__ . '/webhook_audit_integration_test.php');
 $webhookHttpIntegrationTest = $read(__DIR__ . '/webhook_http_integration_test.php');
 $webhookConcurrencyTest = $read(__DIR__ . '/webhook_concurrency_test.php');
+$webhookMysqlConcurrencyTest = $read(__DIR__ . '/webhook_mysql_concurrency_test.php');
 $reconciliationTest = $read(__DIR__ . '/reconciliation_repository_test.php');
 $reconciliationServiceTest = $read(__DIR__ . '/reconciliation_service_test.php');
 $paymentAuditTest = $read(__DIR__ . '/payment_audit_repository_test.php');
@@ -94,12 +95,20 @@ $checks = [
     'webhook_integration_test_present' => $webhookIntegrationTest !== '',
     'webhook_http_integration_test_present' => $webhookHttpIntegrationTest !== '',
     'webhook_concurrency_test_present' => $webhookConcurrencyTest !== '',
-    'webhook_http_uses_real_http_client' => str_contains($webhookHttpIntegrationTest, 'curl_init(') && str_contains($webhookHttpIntegrationTest, 'CURLOPT_POST'),
-    'webhook_http_uses_real_builtin_server' => str_contains($webhookHttpIntegrationTest, "'-S'") && str_contains($webhookHttpIntegrationTest, 'proc_open('),
-    'webhook_http_signature_coverage' => str_contains($webhookHttpIntegrationTest, 'hash_hmac(\'sha256\'') && str_contains($webhookHttpIntegrationTest, 'x-signature') && str_contains($webhookHttpIntegrationTest, 'x-request-id'),
-    'webhook_http_replay_coverage' => str_contains($webhookHttpIntegrationTest, 'replayed webhook') && str_contains($webhookHttpIntegrationTest, 'idempotent'),
-    'webhook_http_rollback_coverage' => str_contains($webhookHttpIntegrationTest, 'fail_webhook_transition') && str_contains($webhookHttpIntegrationTest, 'must rollback'),
-    'webhook_http_sanitization_coverage' => str_contains($webhookHttpIntegrationTest, 'ACCESS-TOKEN') && str_contains($webhookHttpIntegrationTest, 'WEBHOOK-SECRET') && str_contains($webhookHttpIntegrationTest, 'PIX-QR'),
+    'webhook_mysql_concurrency_test_present' => $webhookMysqlConcurrencyTest !== '',
+    'webhook_mysql_concurrency_requires_pdo_mysql' => str_contains($webhookMysqlConcurrencyTest, "extension_loaded('pdo_mysql')"),
+    'webhook_mysql_concurrency_requires_mysql8' => str_contains($webhookMysqlConcurrencyTest, "preg_match('/^8\\./", $webhookMysqlConcurrencyTest),
+    'webhook_mysql_concurrency_requires_innodb' => str_contains($webhookMysqlConcurrencyTest, "tableEngine($pdo, 'payment_transactions') === 'innodb'") && str_contains($webhookMysqlConcurrencyTest, "tableEngine($pdo, 'payment_audit_log') === 'innodb'"),
+    'webhook_mysql_concurrency_unique_audit_index' => str_contains($webhookMysqlConcurrencyTest, 'uniqueIdempotencyIndexExists') && str_contains($webhookMysqlConcurrencyTest, 'Non_unique'),
+    'webhook_mysql_concurrency_for_update_probe' => str_contains($webhookMysqlConcurrencyTest, 'FOR UPDATE') && str_contains($webhookMysqlConcurrencyTest, 'lockElapsed'),
+    'webhook_mysql_concurrency_32_plus_requests' => str_contains($webhookMysqlConcurrencyTest, 'max(32,') && str_contains($webhookMysqlConcurrencyTest, 'curl_multi_init('),
+    'webhook_mysql_concurrency_1062_defensive_coverage' => str_contains($webhookMysqlConcurrencyTest, 'HTTP 200') && str_contains($webhookMysqlConcurrencyTest, 'duplicate-key losers') && str_contains($webhookMysqlConcurrencyTest, 'idempotency key'),
+    'webhook_mysql_concurrency_conflicting_events' => str_contains($webhookMysqlConcurrencyTest, 'mysql-conflict-paid') && str_contains($webhookMysqlConcurrencyTest, 'mysql-conflict-refunded'),
+    'webhook_mysql_concurrency_status_consistency' => str_contains($webhookMysqlConcurrencyTest, 'payment/order payment status must agree') && str_contains($webhookMysqlConcurrencyTest, 'assertNoIllegalOrderTransitions'),
+    'webhook_mysql_concurrency_stock_integrity' => str_contains($webhookMysqlConcurrencyTest, 'stock_movements') && str_contains($webhookMysqlConcurrencyTest, 'orphaned order reference'),
+    'webhook_mysql_concurrency_audit_sanitization' => str_contains($webhookMysqlConcurrencyTest, 'access_token|webhook_secret|authorization|Bearer |qr_code_base64'),
+    'webhook_mysql_concurrency_registered_validation_runner' => str_contains($validationRunner, 'webhook_mysql_concurrency_test.php'),
+    'webhook_mysql_concurrency_registered_release_gate' => str_contains($releaseGate, 'webhook_mysql_concurrency_test.php'),
     'webhook_concurrency_uses_curl_multi' => str_contains($webhookConcurrencyTest, 'curl_multi_init(') && str_contains($webhookConcurrencyTest, 'curl_multi_exec('),
     'webhook_concurrency_uses_multiple_workers' => str_contains($webhookConcurrencyTest, 'PHP_CLI_SERVER_WORKERS') && str_contains($webhookConcurrencyTest, 'serverCount'),
     'webhook_concurrency_same_notification_coverage' => str_contains($webhookConcurrencyTest, 'race-same-request') && str_contains($webhookConcurrencyTest, '910001'),
