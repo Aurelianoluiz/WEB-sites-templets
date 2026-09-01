@@ -78,33 +78,42 @@ $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
 
 $pdo->exec(<<<'SQL'
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL
+);
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
-    user_id INTEGER NULL,
-    customer_name TEXT NOT NULL,
-    email TEXT NOT NULL,
+    customer_id INTEGER NULL,
     status TEXT NOT NULL,
     payment_status TEXT NOT NULL,
-    total REAL NOT NULL,
+    total_amount REAL NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE TABLE payments (
+CREATE TABLE payment_transactions (
     id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL,
     amount REAL NOT NULL,
     method TEXT NOT NULL,
     status TEXT NOT NULL,
-    transaction_id TEXT NULL,
+    provider_payment_id TEXT NULL,
+    external_reference TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
     provider TEXT NOT NULL,
+    currency TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 SQL);
 
-$pdo->exec("INSERT INTO orders VALUES (1, 101, 'Cliente A', 'a@example.test', 'confirmed', 'paid', 150.00, '2026-08-28 10:00:00')");
-$pdo->exec("INSERT INTO orders VALUES (2, 102, 'Cliente B', 'b@example.test', 'confirmed', 'pending', 75.00, '2026-08-29 10:00:00')");
-$pdo->exec("INSERT INTO payments VALUES (1, 1, 150.00, 'pix', 'paid', 'mp-001', 'mercadopago', '2026-08-28 10:05:00', '2026-08-28 10:06:00')");
-$pdo->exec("INSERT INTO payments VALUES (2, 2, 75.00, 'pix', 'pending', 'mp-002', 'mercadopago', '2026-08-29 10:05:00', '2026-08-29 10:06:00')");
+$pdo->exec("INSERT INTO users VALUES (10, 'Cliente A', 'a@example.test')");
+$pdo->exec("INSERT INTO users VALUES (20, 'Cliente B', 'b@example.test')");
+$pdo->exec("INSERT INTO orders VALUES (1, 10, 'confirmed', 'paid', 150.00, '2026-08-28 10:00:00')");
+$pdo->exec("INSERT INTO orders VALUES (2, 20, 'confirmed', 'pending', 75.00, '2026-08-29 10:00:00')");
+$pdo->exec("INSERT INTO payment_transactions VALUES (1, 1, 150.00, 'pix', 'paid', 'mp-001', 'order-101', 'idem-001', 'mercadopago', 'BRL', '2026-08-28 10:05:00', '2026-08-28 10:06:00')");
+$pdo->exec("INSERT INTO payment_transactions VALUES (2, 2, 75.00, 'pix', 'pending', 'mp-002', 'order-102', 'idem-002', 'mercadopago', 'BRL', '2026-08-29 10:05:00', '2026-08-29 10:06:00')
+");
 
 $service = new FinancialService($pdo, new PaymentTransactionRepository($pdo));
 
