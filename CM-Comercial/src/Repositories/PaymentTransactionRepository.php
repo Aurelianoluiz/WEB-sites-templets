@@ -22,10 +22,51 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
     {
     }
 
-    /**
-     * @param array<string, scalar|null> $filters
-     * @return array{0:list<string>,1:list<int|string>}
-     */
+    public function findById(int $id, bool $forUpdate = false): ?array
+    {
+        if ($id < 1) {
+            return null;
+        }
+
+        $sql = 'SELECT p.*, o.status AS order_status, o.payment_status AS order_payment_status,
+                       o.total_amount AS order_total_amount, o.customer_id
+                FROM payment_transactions p
+                LEFT JOIN orders o ON o.id = p.order_id
+                WHERE p.id = :id
+                LIMIT 1';
+        if ($forUpdate && $this->isMysql()) {
+            $sql .= ' FOR UPDATE';
+        }
+
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return is_array($row) ? $row : null;
+        } catch (Throwable $e) {
+            throw new RuntimeException('Unable to load payment transaction.', 0, $e);
+        }
+    }
+
+    public function updateStatus(int $id, string $status): bool
+    {
+        if ($id < 1 || !in_array($status, self::STATUSES, true)) {
+            return false;
+        }
+
+        try {
+            $stmt = $this->db->prepare('UPDATE payment_transactions SET status = :status WHERE id = :id');
+            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->rowCount() > 0;
+        } catch (Throwable $e) {
+            throw new RuntimeException('Unable to update payment transaction status.', 0, $e);
+        }
+    }
+
+    /** @param array<string, scalar|null> $filters */
     private function buildFilters(array $filters): array
     {
         $conditions = [];
@@ -168,7 +209,6 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
     }
 
     /**
-     * Returns database-level reconciliation counters without loading every row.
      * @param array<string, scalar|null> $filters
      * @return array<string,int|float>
      */
@@ -272,5 +312,10 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         }
 
         return $date->format('Y-m-d H:i:s');
+    }
+
+    private function isMysql(): bool
+    {
+        return strtolower((string)$this->db->getAttribute(PDO::ATTR_DRIVER_NAME)) === 'mysql';
     }
 }
