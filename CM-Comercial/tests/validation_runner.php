@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-/** Runs deterministic, environment-independent validation scripts in isolation. */
+/** Runs deterministic and local HTTP integration validation scripts in isolation. */
 $tests = [
-    'payment_core_test.php','payment_service_test.php','payment_operations_test.php','payment_order_policy_test.php','refund_stock_policy_test.php','payment_immutability_test.php','payment_event_ownership_test.php','payment_event_duplicate_test.php','webhook_amount_validation_test.php','webhook_event_id_test.php','webhook_lifecycle_event_test.php','webhook_signature_freshness_test.php','webhook_signature_freshness_runtime_test.php','payment_event_type_validation_test.php','payment_event_record_validation_test.php','payment_transaction_identity_test.php','payment_order_atomicity_test.php','customer_financial_history_test.php','customer_identity_binding_test.php','csrf_test.php','authentication_security_test.php','access_control_test.php','logout_security_test.php','password_auth_audit.php','auth_surface_audit.php','security_audit.php','integration_suite.php','payment_consistency_test.php','stock_payment_idempotency_test.php','stock_payment_bridge_test.php','stock_reconciliation_test.php','stock_payment_policy_validation_test.php','payment_status_normalization_test.php','payment_status_normalization_runtime_test.php','mercadopago_status_validation_test.php','mercadopago_payment_input_validation_test.php','checkout_idempotency_scope_test.php','configuration_surface_test.php','order_service_test.php','admin_order_transition_test.php','financial_service_test.php','reconciliation_controller_test.php','payments_controller_test.php','reconciliation_repository_test.php','reconciliation_service_test.php','payment_audit_repository_test.php',
+    'payment_core_test.php','payment_service_test.php','payment_operations_test.php','payment_order_policy_test.php','refund_stock_policy_test.php','payment_immutability_test.php','payment_event_ownership_test.php','payment_event_duplicate_test.php','webhook_amount_validation_test.php','webhook_event_id_test.php','webhook_lifecycle_event_test.php','webhook_signature_freshness_test.php','webhook_signature_freshness_runtime_test.php','payment_event_type_validation_test.php','payment_event_record_validation_test.php','payment_transaction_identity_test.php','payment_order_atomicity_test.php','customer_financial_history_test.php','customer_identity_binding_test.php','csrf_test.php','authentication_security_test.php','access_control_test.php','logout_security_test.php','password_auth_audit.php','auth_surface_audit.php','security_audit.php','integration_suite.php','payment_consistency_test.php','stock_payment_idempotency_test.php','stock_payment_bridge_test.php','stock_reconciliation_test.php','stock_payment_policy_validation_test.php','payment_status_normalization_test.php','payment_status_normalization_runtime_test.php','mercadopago_status_validation_test.php','mercadopago_payment_input_validation_test.php','checkout_idempotency_scope_test.php','configuration_surface_test.php','order_service_test.php','admin_order_transition_test.php','financial_service_test.php','reconciliation_controller_test.php','payments_controller_test.php','reconciliation_repository_test.php','reconciliation_service_test.php','payment_audit_repository_test.php','webhook_audit_integration_test.php','webhook_http_integration_test.php',
 ];
 
 $php = PHP_BINARY;
@@ -22,9 +22,7 @@ foreach ($tests as $test) {
     echo "=== $test ===\n";
     echo implode("\n", $output) . "\n";
     echo ($exitCode === 0 ? "RESULT: PASS\n" : "RESULT: FAIL ($exitCode)\n");
-    if ($exitCode !== 0) {
-        $failed[] = $test;
-    }
+    if ($exitCode !== 0) $failed[] = $test;
 }
 
 if ($failed !== []) {

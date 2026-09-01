@@ -20,6 +20,11 @@ $paymentRepositoryInterface = $read(__DIR__ . '/../src/Repositories/PaymentTrans
 $paymentAuditRepository = $read(__DIR__ . '/../src/Repositories/PaymentAuditRepository.php');
 $paymentAuditInterface = $read(__DIR__ . '/../src/Repositories/PaymentAuditRepositoryInterface.php');
 $bootstrap = $read(__DIR__ . '/../bootstrap.php');
+$webhook = $read(__DIR__ . '/../webhooks/webhook_handler.php');
+$webhookValidator = $read(__DIR__ . '/../src/Security/WebhookValidator.php');
+$paymentService = $read(__DIR__ . '/../src/Services/PaymentService.php');
+$webhookIntegrationTest = $read(__DIR__ . '/webhook_audit_integration_test.php');
+$webhookHttpIntegrationTest = $read(__DIR__ . '/webhook_http_integration_test.php');
 $reconciliationTest = $read(__DIR__ . '/reconciliation_repository_test.php');
 $reconciliationServiceTest = $read(__DIR__ . '/reconciliation_service_test.php');
 $paymentAuditTest = $read(__DIR__ . '/payment_audit_repository_test.php');
@@ -35,7 +40,6 @@ $checks = [
     'customer_identity_from_authenticated_session' => str_contains($customer, '$_SESSION[\'user\'][\'id\']'),
     'prepared_statement_payment_repository' => (bool)preg_match('/->prepare\s*\(/', $paymentRepository),
     'financial_service_no_inline_sql' => !preg_match($sqlKeywordPattern, $financial),
-
     'reconciliation_service_present' => $reconciliationService !== '',
     'reconciliation_interface_present' => $reconciliationInterface !== '',
     'reconciliation_repository_present' => $reconciliationRepository !== '',
@@ -66,6 +70,38 @@ $checks = [
     'payment_audit_test_present' => $paymentAuditTest !== '',
     'payment_audit_registered_validation_runner' => str_contains($validationRunner, 'payment_audit_repository_test.php'),
     'payment_audit_registered_release_gate' => str_contains($releaseGate, 'payment_audit_repository_test.php'),
+    'webhook_present' => $webhook !== '',
+    'webhook_strict_types' => str_contains($webhook, 'declare(strict_types=1);'),
+    'webhook_no_inline_sql' => !preg_match($sqlKeywordPattern, $webhook),
+    'webhook_no_direct_pdo_calls' => !preg_match($pdoCallPattern, $webhook),
+    'webhook_resolves_validator_from_container' => str_contains($webhook, '$container->get(WebhookValidator::class)'),
+    'webhook_resolves_payment_service_from_container' => str_contains($webhook, '$container->get(PaymentService::class)'),
+    'webhook_resolves_audit_interface_from_container' => str_contains($webhook, '$container->get(PaymentAuditRepositoryInterface::class)'),
+    'webhook_resolves_payment_interface_from_container' => str_contains($webhook, '$container->get(PaymentTransactionRepositoryInterface::class)'),
+    'webhook_uses_audit_repository_for_transaction' => str_contains($webhook, '$auditRepository->transaction('),
+    'webhook_persistent_idempotency' => str_contains($webhook, 'idempotencyKey') && str_contains($webhook, 'isEventProcessed('),
+    'webhook_canonical_audit_repository_only' => !str_contains($webhook, 'PaymentAuditRepository::class') && str_contains($webhook, 'PaymentAuditRepositoryInterface::class'),
+    'webhook_no_raw_body_audit' => !str_contains($webhook, "'body' => $rawBody") && !str_contains($webhook, "'raw_body' => $rawBody"),
+    'webhook_no_gateway_payload_audit' => !str_contains($webhook, 'gateway_payload'),
+    'webhook_no_credentials_audit' => !str_contains($webhook, 'access_token') && !str_contains($webhook, 'authorization') && !str_contains($webhook, 'webhook_secret'),
+    'webhook_no_pix_qr_audit' => !str_contains($webhook, 'pix_qr_code') && !str_contains($webhook, 'qr_code_base64'),
+    'webhook_hmac_validator' => str_contains($webhookValidator, 'hash_hmac(\'sha256\''),
+    'webhook_constant_time_compare' => str_contains($webhookValidator, 'hash_equals('),
+    'webhook_timestamp_freshness' => str_contains($webhookValidator, 'maxSkew') && str_contains($webhookValidator, 'abs($now - (int)$ts)'),
+    'webhook_event_id_idempotency' => str_contains($webhook, "'mp:webhook:'"),
+    'webhook_gateway_access_through_service' => str_contains($paymentService, 'getWebhookPayment('),
+    'webhook_integration_test_present' => $webhookIntegrationTest !== '',
+    'webhook_http_integration_test_present' => $webhookHttpIntegrationTest !== '',
+    'webhook_http_uses_real_http_client' => str_contains($webhookHttpIntegrationTest, 'curl_init(') && str_contains($webhookHttpIntegrationTest, 'CURLOPT_POST'),
+    'webhook_http_uses_real_builtin_server' => str_contains($webhookHttpIntegrationTest, "'-S'") && str_contains($webhookHttpIntegrationTest, 'proc_open('),
+    'webhook_http_signature_coverage' => str_contains($webhookHttpIntegrationTest, 'hash_hmac(\'sha256\'') && str_contains($webhookHttpIntegrationTest, 'x-signature') && str_contains($webhookHttpIntegrationTest, 'x-request-id'),
+    'webhook_http_replay_coverage' => str_contains($webhookHttpIntegrationTest, 'replayed webhook') && str_contains($webhookHttpIntegrationTest, 'idempotent'),
+    'webhook_http_rollback_coverage' => str_contains($webhookHttpIntegrationTest, 'fail_webhook_transition') && str_contains($webhookHttpIntegrationTest, 'must rollback'),
+    'webhook_http_sanitization_coverage' => str_contains($webhookHttpIntegrationTest, 'ACCESS-TOKEN') && str_contains($webhookHttpIntegrationTest, 'WEBHOOK-SECRET') && str_contains($webhookHttpIntegrationTest, 'PIX-QR'),
+    'webhook_integration_test_registered' => str_contains($validationRunner, 'webhook_audit_integration_test.php') && str_contains($releaseGate, 'webhook_audit_integration_test.php'),
+    'webhook_http_test_registered_validation_runner' => str_contains($validationRunner, 'webhook_http_integration_test.php'),
+    'webhook_http_test_registered_release_gate' => str_contains($releaseGate, 'webhook_http_integration_test.php'),
+    'payment_transaction_webhook_repository_method' => str_contains($paymentRepositoryInterface, 'applyWebhookTransition(') && str_contains($paymentRepository, 'applyWebhookTransition('),
     'reconciliation_controller_present' => $reconciliation !== '',
     'reconciliation_view_present' => $reconciliationView !== '',
     'reconciliation_admin_guard' => str_contains($reconciliation, 'require_admin();'),
@@ -83,7 +119,6 @@ $checks = [
     'payments_view_no_sensitive_data' => !str_contains($paymentsView, 'payload') && !str_contains($paymentsView, 'access_token') && !str_contains($paymentsView, 'webhook_secret'),
     'csrf_constant_time_compare' => str_contains($csrf, 'hash_equals('),
     'checkout_no_raw_gateway_return' => str_contains($checkout, "'gateway_data' => \$safeGateway"),
-    'webhook_present' => file_exists(__DIR__ . '/../webhooks/webhook_handler.php'),
     'htaccess_present' => file_exists(__DIR__ . '/../.htaccess'),
     'logout_csrf' => str_contains($logout, 'require_csrf();'),
     'logout_destroy' => str_contains($logout, 'session_destroy();'),
@@ -92,8 +127,5 @@ $checks = [
 ];
 
 $failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));
-foreach ($checks as $name => $ok) {
-    echo ($ok ? 'PASS' : 'FAIL') . ": {$name}\n";
-}
-
+foreach ($checks as $name => $ok) echo ($ok ? 'PASS' : 'FAIL') . ": {$name}\n";
 exit($failed ? 1 : 0);
