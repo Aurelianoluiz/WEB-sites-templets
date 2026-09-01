@@ -68,32 +68,34 @@ CREATE TABLE users (
 );
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
-    user_id INTEGER NULL,
-    customer_name TEXT NOT NULL,
-    email TEXT NOT NULL,
+    customer_id INTEGER NULL,
     status TEXT NOT NULL,
     payment_status TEXT NOT NULL,
-    total REAL NOT NULL,
+    total_amount REAL NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE TABLE payments (
+CREATE TABLE payment_transactions (
     id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL,
     amount REAL NOT NULL,
     method TEXT NOT NULL,
     status TEXT NOT NULL,
-    transaction_id TEXT NULL,
+    provider_payment_id TEXT NULL,
+    external_reference TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
     provider TEXT NOT NULL,
+    currency TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 SQL);
 
 $pdo->exec("INSERT INTO users VALUES (10, 'Cliente A', 'cliente@example.test')");
-$pdo->exec("INSERT INTO orders VALUES (1, 10, 'Cliente A', 'cliente@example.test', 'confirmed', 'paid', 100.00, '2026-08-20 10:00:00')");
-$pdo->exec("INSERT INTO orders VALUES (2, 20, 'Cliente Dois', 'dois@example.test', 'confirmed', 'pending', 200.00, '2026-08-21 10:00:00')");
-$pdo->exec("INSERT INTO payments VALUES (1, 1, 100.00, 'pix', 'paid', 'mp-1', 'mercadopago', '2026-08-20 10:00:00', '2026-08-20 10:01:00')");
-$pdo->exec("INSERT INTO payments VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'mercadopago', '2026-08-21 10:00:00', '2026-08-21 10:01:00')");
+$pdo->exec("INSERT INTO users VALUES (20, 'Cliente Dois', 'dois@example.test')");
+$pdo->exec("INSERT INTO orders VALUES (1, 10, 'confirmed', 'paid', 100.00, '2026-08-20 10:00:00')");
+$pdo->exec("INSERT INTO orders VALUES (2, 20, 'confirmed', 'pending', 200.00, '2026-08-21 10:00:00')");
+$pdo->exec("INSERT INTO payment_transactions VALUES (1, 1, 100.00, 'pix', 'paid', 'mp-1', 'order-1', 'idem-1', 'mercadopago', 'BRL', '2026-08-20 10:00:00', '2026-08-20 10:01:00')");
+$pdo->exec("INSERT INTO payment_transactions VALUES (2, 2, 200.00, 'pix', 'pending', 'mp-2', 'order-2', 'idem-2', 'mercadopago', 'BRL', '2026-08-21 10:00:00', '2026-08-21 10:01:00')");
 
 $service = new ReconciliationService(
     $pdo,
