@@ -5,7 +5,6 @@ require_once __DIR__ . '/../config.php';
 $container = require __DIR__ . '/../bootstrap.php';
 
 use App\Services\ReconciliationService;
-use Throwable;
 
 require_admin();
 
@@ -94,17 +93,14 @@ try {
     $totalPages = $snapshot['page']['total_pages'];
     $page = $snapshot['page']['page'];
     $offset = $snapshot['page']['offset'];
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     http_response_code($e instanceof \InvalidArgumentException ? 400 : 500);
     $error = 'Não foi possível carregar a conciliação financeira.';
 }
 
 if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
     try {
-        $exportKey = hash(
-            'sha256',
-            $idempotencyKey . ':export'
-        );
+        $exportKey = hash('sha256', $idempotencyKey . ':export');
         $export = $reconciliationService->reconcile(
             $exportKey,
             $filters,
@@ -163,7 +159,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv' && $error === null) {
 
         fclose($output);
         exit;
-    } catch (Throwable) {
+    } catch (\Throwable) {
         http_response_code(500);
         $error = 'Unable to export reconciliation data.';
     }
