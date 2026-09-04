@@ -118,7 +118,7 @@ $checks = [
     'webhook_mysql_concurrency_requires_mysql8' => str_contains($webhookMysqlConcurrencyTest, "preg_match('/^8\\./"),
     'webhook_mysql_concurrency_requires_innodb' => str_contains($webhookMysqlConcurrencyTest, "engine(\$pdo, 'payment_transactions')") && str_contains($webhookMysqlConcurrencyTest, "engine(\$pdo, 'orders')"),
     'webhook_mysql_concurrency_32_plus_requests' => str_contains($webhookMysqlConcurrencyTest, 'max(32,') && str_contains($webhookMysqlConcurrencyTest, 'curl_multi_init('),
-    'webhook_mysql_concurrency_conflicting_paid_refunded' => str_contains($webhookMysqlConcurrencyTest, "'paid' : 'refunded'") && str_contains($webhookMysqlConcurrencyTest, 'conflictRequests'),
+    'webhook_mysql_concurrency_conflicting_paid_refunded' => str_contains($webhookMysqlConcurrencyTest, '$isRefund') && str_contains($webhookMysqlConcurrencyTest, '$refundedId') && str_contains($webhookMysqlConcurrencyTest, '$paidId'),
     'webhook_mysql_concurrency_zero_500' => str_contains($webhookMysqlConcurrencyTest, "$result['status'] !== 500"),
     'webhook_mysql_concurrency_stock_invariant' => str_contains($webhookMysqlConcurrencyTest, 'CM_MYSQL_EXPECTED_STOCK_MOVEMENT_DELTA') && str_contains($webhookMysqlConcurrencyTest, 'stockSnapshot'),
     'webhook_mysql_concurrency_history_invariant' => str_contains($webhookMysqlConcurrencyTest, 'order_status_history') && str_contains($webhookMysqlConcurrencyTest, 'illegal order history transition'),
