@@ -3,7 +3,10 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
+use App\Exceptions\InvalidWebhookTransitionException;
+use App\Exceptions\WebhookConcurrencyException;
 use PDO;
+use PDOException;
 use RuntimeException;
 use Throwable;
 
@@ -77,68 +80,246 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
         }
     }
 
+    /**
+     * Applies the complete webhook state transition inside the caller's ACID
+     * transaction. Lock order is always payment_transactions -> orders.
+     */
     public function applyWebhookTransition(int $id, string $providerPaymentId, string $newStatus): array
     {
-        if ($id < 1 || $providerPaymentId === '' || !in_array($newStatus, self::STATUSES, true)) {
-            throw new RuntimeException('Invalid webhook payment transition input.');
+        if ($id < 1 || trim($providerPaymentId) === '' || !in_array($newStatus, self::STATUSES, true)) {
+            throw new InvalidWebhookTransitionException('Invalid webhook payment transition input.');
         }
-        $payment = $this->findById($id, true);
-        if ($payment === null) throw new RuntimeException('Payment transaction not found.');
-        $oldStatus = (string)$payment['status'];
-        $orderId = (int)($payment['order_id'] ?? 0);
-        if ($orderId < 1) throw new RuntimeException('Payment transaction has no valid order.');
-        if ($oldStatus !== $newStatus && !in_array($newStatus, self::ALLOWED_TRANSITIONS[$oldStatus] ?? [], true)) {
-            throw new RuntimeException('Invalid payment state transition.');
+        if (!$this->db->inTransaction()) {
+            throw new RuntimeException('Webhook transition must execute inside an existing ACID transaction.');
         }
 
-        if ($oldStatus !== $newStatus || (string)($payment['provider_payment_id'] ?? '') !== $providerPaymentId) {
-            $stmt = $this->db->prepare(
-                'UPDATE payment_transactions
-                 SET provider_payment_id = :provider_payment_id, status = :status, updated_at = CURRENT_TIMESTAMP
-                 WHERE id = :id'
-            );
-            $stmt->execute([':provider_payment_id'=>$providerPaymentId, ':status'=>$newStatus, ':id'=>$id]);
-        }
+        try {
+            // LOCK ORDER CONTRACT: payment row first, then its order row.
+            $payment = $this->lockPaymentForWebhook($id);
+            if ($payment === null) throw new RuntimeException('Payment transaction not found.');
 
-        if ($newStatus === 'paid' || $newStatus === 'authorized') {
-            $stmt = $this->db->prepare(
-                "UPDATE orders SET payment_status = :payment_status,
-                    status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
-                    updated_at = CURRENT_TIMESTAMP WHERE id = :order_id"
-            );
-            $stmt->execute([':payment_status'=>$newStatus, ':order_id'=>$orderId]);
-        } elseif (in_array($newStatus, ['failed','cancelled'], true)
-            && !in_array($oldStatus, ['failed','cancelled','refunded'], true)) {
-            $this->restoreOrderStock($orderId);
-            $stmt = $this->db->prepare(
-                "UPDATE orders SET payment_status = :payment_status,
-                    status = CASE WHEN status <> 'delivered' THEN 'cancelled' ELSE status END,
-                    updated_at = CURRENT_TIMESTAMP WHERE id = :order_id"
-            );
-            $stmt->execute([':payment_status'=>$newStatus, ':order_id'=>$orderId]);
-        } elseif ($newStatus === 'refunded' && !in_array($oldStatus, ['cancelled','failed','refunded'], true)) {
-            $this->restoreOrderStock($orderId);
-            $stmt = $this->db->prepare(
-                'UPDATE orders SET payment_status = :payment_status, updated_at = CURRENT_TIMESTAMP WHERE id = :order_id'
-            );
-            $stmt->execute([':payment_status'=>$newStatus, ':order_id'=>$orderId]);
-        }
+            $oldStatus = (string)$payment['status'];
+            $orderId = (int)($payment['order_id'] ?? 0);
+            if ($orderId < 1) throw new RuntimeException('Payment transaction has no valid order.');
 
-        return ['transaction_id'=>$id,'order_id'=>$orderId,'old_status'=>$oldStatus,'new_status'=>$newStatus];
+            $this->assertAllowedTransition($oldStatus, $newStatus);
+
+            // The order is deliberately locked before ANY order or stock mutation.
+            $order = $this->lockOrderForWebhook($orderId);
+            if ($order === null) throw new RuntimeException('Order not found for payment transaction.');
+
+            $orderOldStatus = (string)($order['status'] ?? '');
+            $this->assertOrderTransitionConsistency($orderOldStatus, $newStatus);
+
+            if ($oldStatus !== $newStatus || (string)($payment['provider_payment_id'] ?? '') !== trim($providerPaymentId)) {
+                $stmt = $this->db->prepare(
+                    'UPDATE payment_transactions
+                     SET provider_payment_id = :provider_payment_id, status = :status, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = :id'
+                );
+                $stmt->execute([
+                    ':provider_payment_id' => trim($providerPaymentId),
+                    ':status' => $newStatus,
+                    ':id' => $id,
+                ]);
+            }
+
+            $orderNewStatus = $orderOldStatus;
+            if ($newStatus === 'paid' || $newStatus === 'authorized') {
+                if ($orderOldStatus === 'pending') $orderNewStatus = 'confirmed';
+                $this->updateOrderPaymentState($orderId, $newStatus, $orderNewStatus);
+            } elseif (in_array($newStatus, ['failed','cancelled'], true)
+                && !in_array($oldStatus, ['failed','cancelled','refunded'], true)) {
+                $this->restoreOrderStock($orderId, $id, $newStatus);
+                if ($orderOldStatus !== 'delivered') $orderNewStatus = 'cancelled';
+                $this->updateOrderPaymentState($orderId, $newStatus, $orderNewStatus);
+            } elseif ($newStatus === 'refunded' && $oldStatus === 'paid') {
+                $this->restoreOrderStock($orderId, $id, $newStatus);
+                $this->updateOrderPaymentState($orderId, $newStatus, $orderOldStatus);
+            }
+
+            if ($orderOldStatus !== $orderNewStatus) {
+                $history = $this->db->prepare(
+                    'INSERT INTO order_status_history (order_id, from_status, to_status, actor_user_id, note)
+                     VALUES (:order_id, :from_status, :to_status, NULL, :note)'
+                );
+                $history->execute([
+                    ':order_id' => $orderId,
+                    ':from_status' => $orderOldStatus,
+                    ':to_status' => $orderNewStatus,
+                    ':note' => 'payment webhook: ' . $oldStatus . ' -> ' . $newStatus,
+                ]);
+            }
+
+            return [
+                'transaction_id' => $id,
+                'order_id' => $orderId,
+                'old_status' => $oldStatus,
+                'new_status' => $newStatus,
+            ];
+        } catch (InvalidWebhookTransitionException $e) {
+            throw $e;
+        } catch (PDOException $e) {
+            if ($this->isInnoDbConcurrencyException($e)) {
+                // Do not retry here. The enclosing transaction boundary must roll back.
+                throw new WebhookConcurrencyException('InnoDB webhook concurrency conflict; transaction must roll back.', $e);
+            }
+            throw $e;
+        } catch (Throwable $e) {
+            $concurrency = $this->findInnoDbConcurrencyException($e);
+            if ($concurrency !== null) {
+                throw new WebhookConcurrencyException('InnoDB webhook concurrency conflict; transaction must roll back.', $concurrency);
+            }
+            throw $e;
+        }
     }
 
-    private function restoreOrderStock(int $orderId): void
+    private function lockPaymentForWebhook(int $id): ?array
     {
-        $items = $this->db->prepare('SELECT product_id, quantity FROM order_items WHERE order_id = :order_id');
-        $items->execute([':order_id'=>$orderId]);
-        $restore = $this->db->prepare('UPDATE products SET stock_quantity = stock_quantity + :quantity WHERE id = :product_id');
+        $stmt = $this->db->prepare(
+            'SELECT id, order_id, status, provider_payment_id, amount
+             FROM payment_transactions
+             WHERE id = :id
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $stmt->execute([':id' => $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    private function lockOrderForWebhook(int $orderId): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT id, status, payment_status, total_amount
+             FROM orders
+             WHERE id = :order_id
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $stmt->execute([':order_id' => $orderId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    private function assertAllowedTransition(string $oldStatus, string $newStatus): void
+    {
+        if (!in_array($oldStatus, self::STATUSES, true)) {
+            throw new InvalidWebhookTransitionException('Unknown persisted payment state: ' . $oldStatus);
+        }
+        if ($oldStatus === $newStatus) return;
+        if (!in_array($newStatus, self::ALLOWED_TRANSITIONS[$oldStatus] ?? [], true)) {
+            throw new InvalidWebhookTransitionException(
+                sprintf('Illegal payment state transition: %s -> %s.', $oldStatus, $newStatus)
+            );
+        }
+    }
+
+    private function assertOrderTransitionConsistency(string $orderStatus, string $paymentStatus): void
+    {
+        if ($paymentStatus === 'paid' && $orderStatus === 'cancelled') {
+            throw new InvalidWebhookTransitionException('Paid payment cannot regress a cancelled order.');
+        }
+        if ($paymentStatus === 'authorized' && in_array($orderStatus, ['cancelled','delivered'], true)) {
+            throw new InvalidWebhookTransitionException('Authorized payment cannot regress a terminal order.');
+        }
+        if ($paymentStatus === 'refunded' && $orderStatus === 'cancelled') {
+            throw new InvalidWebhookTransitionException('Refund cannot rewrite a cancelled order.');
+        }
+    }
+
+    private function updateOrderPaymentState(int $orderId, string $paymentStatus, string $orderStatus): void
+    {
+        $stmt = $this->db->prepare(
+            'UPDATE orders
+             SET payment_status = :payment_status, status = :status, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :order_id'
+        );
+        $stmt->execute([
+            ':payment_status' => $paymentStatus,
+            ':status' => $orderStatus,
+            ':order_id' => $orderId,
+        ]);
+    }
+
+    private function restoreOrderStock(int $orderId, int $paymentTransactionId, string $reason): void
+    {
+        $items = $this->db->prepare(
+            'SELECT product_id, quantity FROM order_items WHERE order_id = :order_id ORDER BY id FOR UPDATE'
+        );
+        $items->execute([':order_id' => $orderId]);
+        $restore = $this->db->prepare(
+            'UPDATE products SET stock_quantity = stock_quantity + :quantity WHERE id = :product_id'
+        );
+
         while ($item = $items->fetch(PDO::FETCH_ASSOC)) {
             $quantity = (int)($item['quantity'] ?? 0);
             $productId = (int)($item['product_id'] ?? 0);
-            if ($quantity < 1 || $productId < 1) throw new RuntimeException('Invalid order item while restoring stock.');
-            $restore->execute([':quantity'=>$quantity, ':product_id'=>$productId]);
-            if ($restore->rowCount() !== 1) throw new RuntimeException('Unable to restore product stock.');
+            if ($quantity < 1 || $productId < 1) {
+                throw new RuntimeException('Invalid order item while restoring stock.');
+            }
+            $restore->execute([':quantity' => $quantity, ':product_id' => $productId]);
+            if ($restore->rowCount() !== 1) {
+                throw new RuntimeException('Unable to restore product stock.');
+            }
+            $this->recordStockMovementIfSchemaSupportsIt($orderId, $paymentTransactionId, $productId, $quantity, $reason);
         }
+    }
+
+    /**
+     * Keeps stock_movements in the same transaction without assuming a single
+     * deployment-specific schema. Only known canonical columns are populated.
+     */
+    private function recordStockMovementIfSchemaSupportsIt(int $orderId, int $paymentTransactionId, int $productId, int $quantity, string $reason): void
+    {
+        if (!$this->isMysql()) return;
+        $columns = $this->tableColumns('stock_movements');
+        $required = ['product_id', 'quantity'];
+        foreach ($required as $column) {
+            if (!in_array($column, $columns, true)) return;
+        }
+
+        $fields = ['product_id', 'quantity'];
+        $values = [':product_id', ':quantity'];
+        $params = [':product_id' => $productId, ':quantity' => $quantity];
+        if (in_array('order_id', $columns, true)) { $fields[] = 'order_id'; $values[] = ':order_id'; $params[':order_id'] = $orderId; }
+        if (in_array('payment_transaction_id', $columns, true)) { $fields[] = 'payment_transaction_id'; $values[] = ':payment_transaction_id'; $params[':payment_transaction_id'] = $paymentTransactionId; }
+        if (in_array('type', $columns, true)) { $fields[] = 'type'; $values[] = ':type'; $params[':type'] = 'restore'; }
+        if (in_array('movement_type', $columns, true)) { $fields[] = 'movement_type'; $values[] = ':movement_type'; $params[':movement_type'] = 'restore'; }
+        if (in_array('reason', $columns, true)) { $fields[] = 'reason'; $values[] = ':reason'; $params[':reason'] = $reason; }
+        if (in_array('reference', $columns, true)) { $fields[] = 'reference'; $values[] = ':reference'; $params[':reference'] = 'webhook:' . $paymentTransactionId . ':' . $productId . ':' . $reason; }
+
+        $sql = 'INSERT INTO stock_movements (' . implode(', ', $fields) . ') VALUES (' . implode(', ', $values) . ')';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    private function tableColumns(string $table): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table'
+        );
+        $stmt->execute([':table' => $table]);
+        return array_map('strtolower', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'COLUMN_NAME'));
+    }
+
+    private function isInnoDbConcurrencyException(PDOException $e): bool
+    {
+        $sqlState = (string)$e->getCode();
+        $driverCode = isset($e->errorInfo[1]) ? (int)$e->errorInfo[1] : 0;
+        return $sqlState === '40001' || $driverCode === 1213 || $driverCode === 1205;
+    }
+
+    private function findInnoDbConcurrencyException(Throwable $e): ?PDOException
+    {
+        $current = $e;
+        while ($current !== null) {
+            if ($current instanceof PDOException && $this->isInnoDbConcurrencyException($current)) {
+                return $current;
+            }
+            $current = $current->getPrevious();
+        }
+        return null;
     }
 
     private function buildFilters(array $filters): array
