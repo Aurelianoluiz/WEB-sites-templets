@@ -22,6 +22,8 @@ $paymentAuditRepository = $read(__DIR__ . '/../src/Repositories/PaymentAuditRepo
 $paymentAuditStrictRepository = $read(__DIR__ . '/../src/Repositories/PaymentAuditIdempotencyRepository.php');
 $paymentAuditInterface = $read(__DIR__ . '/../src/Repositories/PaymentAuditRepositoryInterface.php');
 $idempotencyException = $read(__DIR__ . '/../src/Exceptions/IdempotencyConflictException.php');
+$invalidTransitionException = $read(__DIR__ . '/../src/Exceptions/InvalidWebhookTransitionException.php');
+$concurrencyException = $read(__DIR__ . '/../src/Exceptions/WebhookConcurrencyException.php');
 $bootstrap = $read(__DIR__ . '/../bootstrap.php');
 $webhook = $read(__DIR__ . '/../webhooks/webhook_handler.php');
 $webhookValidator = $read(__DIR__ . '/../src/Security/WebhookValidator.php');
@@ -95,7 +97,9 @@ $checks = [
     'webhook_uses_audit_repository_for_transaction' => str_contains($webhook, '$auditRepository->transaction('),
     'webhook_persistent_idempotency' => str_contains($webhook, 'idempotencyKey') && str_contains($webhook, 'isEventProcessed('),
     'webhook_duplicate_exception_handled' => str_contains($webhook, 'catch (IdempotencyConflictException $e)'),
+    'webhook_invalid_transition_exception_handled' => str_contains($webhook, 'catch (InvalidWebhookTransitionException $e)'),
     'webhook_duplicate_returns_200' => str_contains($webhook, "\$respond(200, ['received' => true, 'idempotent' => true])"),
+    'webhook_concurrency_returns_controlled_response' => str_contains($webhook, "'retry_safe' => true") && str_contains($webhook, '1213'),
     'webhook_canonical_audit_repository_only' => !str_contains($webhook, 'PaymentAuditRepository::class') && str_contains($webhook, 'PaymentAuditRepositoryInterface::class'),
     'webhook_no_raw_body_audit' => !str_contains($webhook, "'body' => $rawBody") && !str_contains($webhook, "'raw_body' => $rawBody"),
     'webhook_no_gateway_payload_audit' => !str_contains($webhook, 'gateway_payload'),
@@ -112,16 +116,19 @@ $checks = [
     'webhook_mysql_concurrency_test_present' => $webhookMysqlConcurrencyTest !== '',
     'webhook_mysql_concurrency_requires_pdo_mysql' => str_contains($webhookMysqlConcurrencyTest, "extension_loaded('pdo_mysql')"),
     'webhook_mysql_concurrency_requires_mysql8' => str_contains($webhookMysqlConcurrencyTest, "preg_match('/^8\\./"),
-    'webhook_mysql_concurrency_requires_innodb' => str_contains($webhookMysqlConcurrencyTest, 'tableEngine($pdo, \'payment_transactions\') === \'innodb\'') && str_contains($webhookMysqlConcurrencyTest, 'tableEngine($pdo, \'payment_audit_log\') === \'innodb\''),
-    'webhook_mysql_concurrency_unique_audit_index' => str_contains($webhookMysqlConcurrencyTest, 'uniqueIdempotencyIndexExists') && str_contains($webhookMysqlConcurrencyTest, 'Non_unique'),
+    'webhook_mysql_concurrency_requires_innodb' => str_contains($webhookMysqlConcurrencyTest, "engine(\$pdo, 'payment_transactions')") && str_contains($webhookMysqlConcurrencyTest, "engine(\$pdo, 'orders')"),
     'webhook_mysql_concurrency_32_plus_requests' => str_contains($webhookMysqlConcurrencyTest, 'max(32,') && str_contains($webhookMysqlConcurrencyTest, 'curl_multi_init('),
+    'webhook_mysql_concurrency_conflicting_paid_refunded' => str_contains($webhookMysqlConcurrencyTest, "'paid' : 'refunded'") && str_contains($webhookMysqlConcurrencyTest, 'conflictRequests'),
+    'webhook_mysql_concurrency_zero_500' => str_contains($webhookMysqlConcurrencyTest, "$result['status'] !== 500"),
+    'webhook_mysql_concurrency_stock_invariant' => str_contains($webhookMysqlConcurrencyTest, 'CM_MYSQL_EXPECTED_STOCK_MOVEMENT_DELTA') && str_contains($webhookMysqlConcurrencyTest, 'stockSnapshot'),
+    'webhook_mysql_concurrency_history_invariant' => str_contains($webhookMysqlConcurrencyTest, 'order_status_history') && str_contains($webhookMysqlConcurrencyTest, 'illegal order history transition'),
+    'webhook_mysql_concurrency_audit_invariant' => str_contains($webhookMysqlConcurrencyTest, 'duplicate payment_audit_log idempotency keys'),
     'webhook_mysql_concurrency_registered_validation_runner' => str_contains($validationRunner, 'webhook_mysql_concurrency_test.php'),
     'webhook_mysql_concurrency_registered_release_gate' => str_contains($releaseGate, 'webhook_mysql_concurrency_test.php'),
     'webhook_concurrency_uses_curl_multi' => str_contains($webhookConcurrencyTest, 'curl_multi_init(') && str_contains($webhookConcurrencyTest, 'curl_multi_exec('),
     'webhook_concurrency_uses_multiple_workers' => str_contains($webhookConcurrencyTest, 'PHP_CLI_SERVER_WORKERS') && str_contains($webhookConcurrencyTest, 'serverCount'),
     'webhook_concurrency_same_notification_coverage' => str_contains($webhookConcurrencyTest, 'race-same-request') && str_contains($webhookConcurrencyTest, '910001'),
     'webhook_concurrency_unique_audit_assertion' => str_contains($webhookConcurrencyTest, 'COUNT(*) FROM payment_audit_log') && str_contains($webhookConcurrencyTest, 'idempotency_key'),
-    'webhook_concurrency_transaction_lock_coverage' => str_contains($paymentRepository, 'findById($id, true)') && str_contains($paymentRepository, 'findByExternalReference($externalReference, true)'),
     'webhook_concurrency_atomic_rollback_coverage' => str_contains($webhookConcurrencyTest, 'orphanAudit') && str_contains($webhookConcurrencyTest, 'rollback burst'),
     'webhook_concurrency_registered_validation_runner' => str_contains($validationRunner, 'webhook_concurrency_test.php'),
     'webhook_concurrency_registered_release_gate' => str_contains($releaseGate, 'webhook_concurrency_test.php'),
@@ -133,6 +140,26 @@ $checks = [
     'idempotency_hardening_test_checks_1062' => str_contains($idempotencyHardeningTest, '23000') && str_contains($idempotencyHardeningTest, '1062'),
     'idempotency_hardening_test_checks_rollback' => str_contains($idempotencyHardeningTest, 'Losing transaction mutation was not rolled back'),
     'payment_transaction_webhook_repository_method' => str_contains($paymentRepositoryInterface, 'applyWebhookTransition(') && str_contains($paymentRepository, 'applyWebhookTransition('),
+    'webhook_invalid_transition_exception_present' => str_contains($invalidTransitionException, 'class InvalidWebhookTransitionException extends RuntimeException'),
+    'webhook_concurrency_exception_present' => str_contains($concurrencyException, 'class WebhookConcurrencyException extends RuntimeException'),
+    'webhook_double_pessimistic_lock' => substr_count(strtoupper($paymentRepository), 'FOR UPDATE') >= 2
+        && str_contains($paymentRepository, 'FROM payment_transactions')
+        && str_contains($paymentRepository, 'FROM orders'),
+    'webhook_lock_order_payment_then_order' => strpos($paymentRepository, 'FROM payment_transactions') < strpos($paymentRepository, 'FROM orders')
+        && str_contains($paymentRepository, 'lockPaymentForWebhook(')
+        && str_contains($paymentRepository, 'lockOrderForWebhook('),
+    'webhook_monotonic_state_matrix' => str_contains($paymentRepository, 'ALLOWED_TRANSITIONS')
+        && str_contains($paymentRepository, "'paid' => ['refunded']")
+        && str_contains($paymentRepository, "'refunded' => []")
+        && str_contains($paymentRepository, "'cancelled' => []"),
+    'webhook_illegal_transition_domain_exception' => str_contains($paymentRepository, 'throw new InvalidWebhookTransitionException('),
+    'webhook_transaction_boundary_required' => str_contains($paymentRepository, '$this->db->inTransaction()') && str_contains($paymentRepository, 'existing ACID transaction'),
+    'webhook_history_same_transaction' => str_contains($paymentRepository, 'INSERT INTO order_status_history') && str_contains($paymentRepository, 'applyWebhookTransition'),
+    'webhook_stock_same_transaction' => str_contains($paymentRepository, 'restoreOrderStock(') && str_contains($paymentRepository, 'stock_movements'),
+    'webhook_deadlock_1213_handled' => str_contains($paymentRepository, '1213') && str_contains($paymentRepository, "'40001'"),
+    'webhook_lock_timeout_1205_handled' => str_contains($paymentRepository, '1205'),
+    'webhook_concurrency_exception_propagated' => str_contains($paymentRepository, 'throw new WebhookConcurrencyException('),
+    'webhook_no_blind_retry' => !str_contains($paymentRepository, 'retry(') && !str_contains($paymentRepository, 'sleep('),
     'reconciliation_controller_present' => $reconciliation !== '',
     'reconciliation_view_present' => $reconciliationView !== '',
     'reconciliation_admin_guard' => str_contains($reconciliation, 'require_admin();'),
