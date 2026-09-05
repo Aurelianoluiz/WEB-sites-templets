@@ -3,18 +3,38 @@ declare(strict_types=1);
 
 $container = require dirname(__DIR__) . '/bootstrap.php';
 
-use App\Config\Database;
-use App\Gateways\MercadoPagoGateway;
+use App\Exceptions\IdempotencyConflictException;
+use App\Exceptions\InvalidWebhookTransitionException;
+use App\Repositories\PaymentAuditRepositoryInterface;
+use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Security\WebhookValidator;
+use App\Services\PaymentService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
+$respond = static function (int $status, array $body): never {
+    http_response_code($status);
+    echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    exit;
+};
+
+$isInnoDbConcurrencyError = static function (Throwable $error): bool {
+    for ($current = $error; $current !== null; $current = $current->getPrevious()) {
+        $message = $current->getMessage();
+        $code = (int)$current->getCode();
+        $sqlState = $current instanceof PDOException ? (string)$current->errorInfo[0] ?? '' : '';
+        if ($code === 1213 || $code === 1205 || $sqlState === '40001' || str_contains($message, 'SQLSTATE[40001]')
+            || str_contains($message, 'Deadlock found') || str_contains($message, 'Lock wait timeout exceeded')) {
+            return true;
+        }
+    }
+    return false;
+};
+
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     header('Allow: POST');
-    http_response_code(405);
-    echo json_encode(['received' => false, 'error' => 'method_not_allowed']);
-    exit;
+    $respond(405, ['received' => false, 'error' => 'method_not_allowed']);
 }
 
 $rawBody = (string)file_get_contents('php://input');
@@ -24,80 +44,148 @@ try {
     /** @var WebhookValidator $validator */
     $validator = $container->get(WebhookValidator::class);
     if (!$validator->validate($rawBody, $headers)) {
-        http_response_code(401);
-        echo json_encode(['received' => false, 'error' => 'invalid_signature']);
-        exit;
+        $respond(401, ['received' => false, 'error' => 'invalid_signature']);
     }
 
     $payload = json_decode($rawBody, true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($payload)) {
+        throw new InvalidArgumentException('Invalid webhook payload.');
+    }
+
     $dataId = trim((string)($payload['data']['id'] ?? ''));
-    if (!ctype_digit($dataId) || $dataId === '0') throw new InvalidArgumentException('Invalid data.id.');
+    if (!ctype_digit($dataId) || $dataId === '0') {
+        throw new InvalidArgumentException('Invalid data.id.');
+    }
 
-    /** @var MercadoPagoGateway $gateway */
-    $gateway = $container->get(MercadoPagoGateway::class);
-    $gatewayPayment = $gateway->getPayment($dataId);
+    $eventType = trim((string)($payload['type'] ?? 'payment'));
+    $action = trim((string)($payload['action'] ?? 'payment.updated'));
+    if ($eventType === '' || $action === '') {
+        throw new InvalidArgumentException('Invalid webhook event type.');
+    }
+
+    $notificationId = trim((string)($payload['id'] ?? ''));
+    $idempotencyKey = $notificationId !== ''
+        ? 'mp:webhook:' . $notificationId
+        : 'mp:webhook:' . hash('sha256', implode('|', [$eventType, $action, $dataId]));
+
+    /** @var PaymentService $paymentService */
+    $paymentService = $container->get(PaymentService::class);
+    /** @var PaymentAuditRepositoryInterface $auditRepository */
+    $auditRepository = $container->get(PaymentAuditRepositoryInterface::class);
+    /** @var PaymentTransactionRepositoryInterface $transactionRepository */
+    $transactionRepository = $container->get(PaymentTransactionRepositoryInterface::class);
+
+    $gatewayPayment = $paymentService->getWebhookPayment($dataId);
+    $gatewayStatus = trim((string)($gatewayPayment['status'] ?? ''));
+    $gatewayProviderId = trim((string)($gatewayPayment['provider_payment_id'] ?? $dataId));
     $externalReference = trim((string)($gatewayPayment['raw']['external_reference'] ?? ''));
-    if (!ctype_digit($externalReference) || $externalReference === '0') throw new InvalidArgumentException('Invalid external_reference.');
+    $gatewayAmount = round((float)($gatewayPayment['raw']['transaction_amount'] ?? 0), 2);
 
-    $eventType = trim((string)($payload['type'] ?? $payload['action'] ?? 'payment'));
-    $action = trim((string)($payload['action'] ?? ''));
-    $database = $container->get(Database::class);
+    if (!in_array($gatewayStatus, ['pending', 'authorized', 'paid', 'failed', 'cancelled', 'refunded'], true)) {
+        throw new InvalidArgumentException('Unsupported normalized payment status.');
+    }
+    if ($gatewayProviderId === '' || !ctype_digit($gatewayProviderId)) {
+        throw new InvalidArgumentException('Invalid provider payment id.');
+    }
+    if ($externalReference === '') {
+        throw new InvalidArgumentException('Missing payment external reference.');
+    }
+    if ($gatewayAmount <= 0) {
+        throw new InvalidArgumentException('Invalid gateway amount.');
+    }
 
-    $database->transaction(function (PDO $pdo) use ($externalReference, $dataId, $gatewayPayment, $eventType, $action, $rawBody): void {
-        $paymentQuery = $pdo->prepare('SELECT id,order_id,status,amount,webhook_event_id FROM payment_transactions WHERE order_id=? AND provider=\'mercadopago\' LIMIT 1 FOR UPDATE');
-        $paymentQuery->execute([(int)$externalReference]);
-        $payment = $paymentQuery->fetch();
-        if ($payment === false) throw new RuntimeException('Internal payment transaction not found.');
+    $safeContext = [
+        'notification_id' => $notificationId !== '' ? $notificationId : null,
+        'action' => substr($action, 0, 100),
+        'type' => substr($eventType, 0, 100),
+        'data_id' => $dataId,
+        'live_mode' => isset($payload['live_mode']) ? (bool)$payload['live_mode'] : null,
+        'provider_status' => $gatewayStatus,
+    ];
 
-        $gatewayAmount = round((float)($gatewayPayment['raw']['transaction_amount'] ?? 0), 2);
-        if ($gatewayAmount <= 0 || $gatewayAmount !== round((float)$payment['amount'], 2)) throw new RuntimeException('Payment amount mismatch.');
+    $result = $auditRepository->transaction(function () use (
+        $auditRepository,
+        $transactionRepository,
+        $externalReference,
+        $gatewayProviderId,
+        $gatewayStatus,
+        $gatewayAmount,
+        $idempotencyKey,
+        $eventType,
+        $safeContext
+    ): array {
+        if ($auditRepository->isEventProcessed($idempotencyKey)) {
+            return ['duplicate' => true];
+        }
 
-        // Transport identifiers are used by signature validation, not business identity.
-        $eventId = hash('sha256', implode('|', ['mp', $eventType, $action, $dataId, $gatewayPayment['status'], $gatewayPayment['transaction_id']]));
-        if ((string)($payment['webhook_event_id'] ?? '') === $eventId) return;
+        // findByExternalReference(..., true) is the pessimistic lock acquisition.
+        // It executes SELECT ... FOR UPDATE on MySQL while this transaction owns
+        // the row lock, preventing concurrent state-machine decisions.
+        $payment = $transactionRepository->findByExternalReference($externalReference, true);
+        if ($payment === null) {
+            throw new RuntimeException('Internal payment transaction not found.');
+        }
 
+        $expectedAmount = round((float)$payment['amount'], 2);
+        if ($expectedAmount !== $gatewayAmount) {
+            throw new RuntimeException('Payment amount mismatch.');
+        }
+
+        $transactionId = (int)$payment['id'];
         $oldStatus = (string)$payment['status'];
-        $newStatus = $gatewayPayment['status'];
-        $allowed = [
-            'pending' => ['authorized','paid','failed','cancelled'],
-            'authorized' => ['paid','failed','cancelled'],
-            'paid' => ['refunded'],
-            'failed' => [],
-            'cancelled' => [],
-            'refunded' => [],
+        $orderId = (int)$payment['order_id'];
+
+        $auditId = $auditRepository->logEvent([
+            'payment_transaction_id' => $transactionId,
+            'event_type' => 'webhook.' . $eventType . '_updated',
+            'old_status' => $oldStatus,
+            'new_status' => $gatewayStatus,
+            'actor' => 'webhook:mercadopago',
+            'idempotency_key' => $idempotencyKey,
+            'payload' => array_merge($safeContext, [
+                'transaction_id' => $transactionId,
+                'order_id' => $orderId,
+            ]),
+        ]);
+
+        $transition = $transactionRepository->applyWebhookTransition(
+            $transactionId,
+            $gatewayProviderId,
+            $gatewayStatus
+        );
+
+        return [
+            'duplicate' => false,
+            'transaction_id' => $transition['transaction_id'],
+            'order_id' => $transition['order_id'],
+            'old_status' => $transition['old_status'],
+            'new_status' => $transition['new_status'],
+            'audit_id' => $auditId,
         ];
-        if ($oldStatus !== $newStatus && !in_array($newStatus, $allowed[$oldStatus] ?? [], true)) {
-            throw new RuntimeException('Invalid payment state transition.');
-        }
-
-        $update = $pdo->prepare('UPDATE payment_transactions SET provider_payment_id=?,status=?,webhook_event_id=?,last_webhook_at=CURRENT_TIMESTAMP(6),gateway_payload=?,updated_at=CURRENT_TIMESTAMP(6) WHERE id=?');
-        $update->execute([$dataId,$newStatus,$eventId,json_encode($gatewayPayment['raw'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)$payment['id']]);
-
-        if ($newStatus === 'paid' || $newStatus === 'authorized') {
-            $pdo->prepare('UPDATE orders SET payment_status=?,status=CASE WHEN status=\'pending\' THEN \'confirmed\' ELSE status END WHERE id=?')->execute([$newStatus,(int)$payment['order_id']]);
-        } elseif (in_array($newStatus,['failed','cancelled'],true) && !in_array($oldStatus,['failed','cancelled','refunded'],true)) {
-            $items=$pdo->prepare('SELECT product_id,quantity FROM order_items WHERE order_id=?'); $items->execute([(int)$payment['order_id']]);
-            $restore=$pdo->prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?');
-            while($item=$items->fetch()) $restore->execute([(int)$item['quantity'],(int)$item['product_id']]);
-            $pdo->prepare('UPDATE orders SET payment_status=?,status=\'cancelled\' WHERE id=? AND status<>\'delivered\'')->execute([$newStatus,(int)$payment['order_id']]);
-        } elseif ($newStatus === 'refunded' && !in_array($oldStatus,['cancelled','failed','refunded'],true)) {
-            $items=$pdo->prepare('SELECT product_id,quantity FROM order_items WHERE order_id=?'); $items->execute([(int)$payment['order_id']]);
-            $restore=$pdo->prepare('UPDATE products SET stock_quantity=stock_quantity+? WHERE id=?');
-            while($item=$items->fetch()) $restore->execute([(int)$item['quantity'],(int)$item['product_id']]);
-            $pdo->prepare('UPDATE orders SET payment_status=? WHERE id=?')->execute([$newStatus,(int)$payment['order_id']]);
-        }
-
-        $audit=$pdo->prepare('INSERT INTO payment_audit_log(payment_transaction_id,event_type,old_status,new_status,actor,payload) VALUES(?,?,?,?,\'mercadopago-webhook\',?)');
-        $audit->execute([(int)$payment['id'],$eventType,$oldStatus,$newStatus,json_encode(['event_id'=>$eventId,'body'=>$rawBody],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR)]);
     });
 
-    http_response_code(200);
-    echo json_encode(['received' => true]);
-} catch (InvalidArgumentException $e) {
-    http_response_code(422);
-    echo json_encode(['received' => false, 'error' => 'invalid_payload']);
+    $respond(200, [
+        'received' => true,
+        'idempotent' => (bool)($result['duplicate'] ?? false),
+    ]);
+} catch (IdempotencyConflictException $e) {
+    error_log('[cm-comercial webhook idempotency] concurrent duplicate handled');
+    $respond(200, ['received' => true, 'idempotent' => true]);
+} catch (InvalidWebhookTransitionException $e) {
+    error_log('[cm-comercial webhook state] invalid transition rejected');
+    $respond(200, ['received' => true, 'idempotent' => true, 'state_rejected' => true]);
 } catch (Throwable $e) {
+    if ($isInnoDbConcurrencyError($e)) {
+        // The repository transaction wrapper has already rolled back. Never retry
+        // inside the request: the gateway can safely redeliver and idempotency will
+        // arbitrate the next attempt without duplicating side effects.
+        error_log('[cm-comercial webhook concurrency] InnoDB 1213/1205 handled after rollback');
+        $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
+    }
+    if ($e instanceof InvalidArgumentException) {
+        error_log('[cm-comercial webhook validation] ' . $e->getMessage());
+        $respond(422, ['received' => false, 'error' => 'invalid_payload']);
+    }
     error_log('[cm-comercial webhook] ' . $e->getMessage());
-    http_response_code(500);
-    echo json_encode(['received' => false, 'error' => 'processing_failed']);
+    $respond(500, ['received' => false, 'error' => 'processing_failed']);
 }

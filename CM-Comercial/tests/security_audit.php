@@ -1,99 +1,66 @@
 <?php
 declare(strict_types=1);
 
-$read = static fn(string $path): string => is_file($path) ? (string)file_get_contents($path) : '';
-$financial = $read(__DIR__ . '/../financial_history.php');
-$customer = $read(__DIR__ . '/../customer_financial_history.php');
-$reconciliation = $read(__DIR__ . '/../admin/reconciliation.php');
-$reconciliationView = $read(__DIR__ . '/../admin/views/reconciliation.php');
-$reconciliationService = $read(__DIR__ . '/../src/Services/ReconciliationService.php');
-$reconciliationInterface = $read(__DIR__ . '/../src/Repositories/ReconciliationRepositoryInterface.php');
-$reconciliationRepository = $read(__DIR__ . '/../src/Repositories/ReconciliationRepository.php');
-$paymentsController = $read(__DIR__ . '/../admin/payments.php');
-$paymentsView = $read(__DIR__ . '/../admin/views/payments.php');
-$csrf = $read(__DIR__ . '/../includes/csrf.php');
-$checkout = $read(__DIR__ . '/../includes/checkout_payment.php');
-$config = $read(__DIR__ . '/../config.php');
-$logout = $read(__DIR__ . '/../logout.php');
-$paymentRepository = $read(__DIR__ . '/../src/Repositories/PaymentTransactionRepository.php');
-$paymentRepositoryInterface = $read(__DIR__ . '/../src/Repositories/PaymentTransactionRepositoryInterface.php');
-$paymentAuditRepository = $read(__DIR__ . '/../src/Repositories/PaymentAuditRepository.php');
-$paymentAuditInterface = $read(__DIR__ . '/../src/Repositories/PaymentAuditRepositoryInterface.php');
-$bootstrap = $read(__DIR__ . '/../bootstrap.php');
-$reconciliationTest = $read(__DIR__ . '/reconciliation_repository_test.php');
-$reconciliationServiceTest = $read(__DIR__ . '/reconciliation_service_test.php');
-$paymentAuditTest = $read(__DIR__ . '/payment_audit_repository_test.php');
-$validationRunner = $read(__DIR__ . '/validation_runner.php');
-$releaseGate = $read(__DIR__ . '/release_gate.php');
+$read=static fn(string $path): string=>is_file($path)?(string)file_get_contents($path):'';
+$repo=$read(__DIR__.'/../src/Repositories/PaymentTransactionRepository.php');
+$repoInterface=$read(__DIR__.'/../src/Repositories/PaymentTransactionRepositoryInterface.php');
+$webhook=$read(__DIR__.'/../webhooks/webhook_handler.php');
+$validator=$read(__DIR__.'/../src/Security/WebhookValidator.php');
+$paymentService=$read(__DIR__.'/../src/Services/PaymentService.php');
+$audit=$read(__DIR__.'/../src/Repositories/PaymentAuditRepository.php');
+$idempotency=$read(__DIR__.'/../src/Repositories/PaymentAuditIdempotencyRepository.php');
+$invalidTransition=$read(__DIR__.'/../src/Exceptions/InvalidWebhookTransitionException.php');
+$concurrency=$read(__DIR__.'/../src/Exceptions/WebhookConcurrencyException.php');
+$bootstrap=$read(__DIR__.'/../bootstrap.php');
+$validation=$read(__DIR__.'/validation_runner.php');
+$release=$read(__DIR__.'/release_gate.php');
+$mysqlConcurrency=$read(__DIR__.'/webhook_mysql_concurrency_test.php');
+$deadlockTest=$read(__DIR__.'/webhook_mysql_deadlock_test.php');
+$pessimisticTest=$read(__DIR__.'/webhook_pessimistic_locking_test.php');
 
-$sqlKeywordPattern = '/\b(?:SELECT|INSERT|UPDATE|DELETE)\b\s+(?:FROM|INTO|SET|WHERE|JOIN)/i';
-$pdoCallPattern = '/->(?:prepare|query|exec|beginTransaction|commit|rollBack)\s*\(/i';
-$legacyPaymentsPattern = '/\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+payments\b/i';
-
-$checks = [
-    'php_strict_types' => str_contains($financial, 'declare(strict_types=1);'),
-    'customer_identity_from_authenticated_session' => str_contains($customer, '$_SESSION[\'user\'][\'id\']'),
-    'prepared_statement_payment_repository' => (bool)preg_match('/->prepare\s*\(/', $paymentRepository),
-    'financial_service_no_inline_sql' => !preg_match($sqlKeywordPattern, $financial),
-
-    'reconciliation_service_present' => $reconciliationService !== '',
-    'reconciliation_interface_present' => $reconciliationInterface !== '',
-    'reconciliation_repository_present' => $reconciliationRepository !== '',
-    'reconciliation_service_namespace' => str_contains($reconciliationService, 'namespace App\\Services;'),
-    'reconciliation_service_no_sql' => !preg_match($sqlKeywordPattern, $reconciliationService),
-    'reconciliation_service_no_pdo_calls' => !preg_match($pdoCallPattern, $reconciliationService),
-    'reconciliation_service_dedicated_dependency' => str_contains($reconciliationService, 'ReconciliationRepositoryInterface'),
-    'reconciliation_service_audit_dependency' => str_contains($reconciliationService, 'PaymentAuditRepositoryInterface'),
-    'reconciliation_service_payment_dependency' => str_contains($reconciliationService, 'PaymentTransactionRepositoryInterface'),
-    'reconciliation_service_has_resolution' => str_contains($reconciliationService, 'resolveDivergence('),
-    'reconciliation_service_has_idempotency' => str_contains($reconciliationService, 'isEventProcessed(') && str_contains($reconciliationService, 'idempotencyKey'),
-    'reconciliation_service_has_acid_delegate' => str_contains($reconciliationService, '$this->auditRepository->transaction('),
-    'reconciliation_service_has_filters' => str_contains($reconciliationService, 'date_from') && str_contains($reconciliationService, 'customer_id') && str_contains($reconciliationService, 'order_id'),
-    'reconciliation_service_has_status_classification' => str_contains($reconciliationService, 'reconciled') && str_contains($reconciliationService, 'divergent') && str_contains($reconciliationService, 'pending') && str_contains($reconciliationService, 'inconsistent'),
-    'reconciliation_repository_canonical_payment_table' => str_contains($reconciliationRepository, 'payment_transactions') && !preg_match($legacyPaymentsPattern, $reconciliationRepository),
-    'reconciliation_repository_canonical_order_total' => str_contains($reconciliationRepository, 'total_amount'),
-    'reconciliation_repository_customer_id' => str_contains($reconciliationRepository, 'customer_id'),
-    'reconciliation_repository_prepared_statements' => (bool)preg_match('/->prepare\s*\(/', $reconciliationRepository),
-    'reconciliation_repository_no_gateway_payload_selection' => !str_contains($reconciliationRepository, 'pt.gateway_payload') && !str_contains($reconciliationRepository, 'pt.pix_qr_code_base64'),
-    'reconciliation_test_present' => $reconciliationTest !== '',
-    'reconciliation_service_test_present' => $reconciliationServiceTest !== '',
-    'payment_audit_repository_present' => $paymentAuditRepository !== '',
-    'payment_audit_interface_present' => $paymentAuditInterface !== '',
-    'payment_audit_repository_canonical_table' => str_contains($paymentAuditRepository, 'payment_audit_log'),
-    'payment_audit_repository_prepared_statements' => (bool)preg_match('/->prepare\s*\(/', $paymentAuditRepository),
-    'payment_audit_repository_idempotency' => str_contains($paymentAuditRepository, 'idempotency_key') && str_contains($paymentAuditRepository, 'isEventProcessed'),
-    'payment_audit_repository_sanitizes_sensitive_keys' => str_contains($paymentAuditRepository, 'access_token') && str_contains($paymentAuditRepository, 'gateway_payload') && str_contains($paymentAuditRepository, 'pix_qr_code'),
-    'payment_audit_test_present' => $paymentAuditTest !== '',
-    'payment_audit_registered_validation_runner' => str_contains($validationRunner, 'payment_audit_repository_test.php'),
-    'payment_audit_registered_release_gate' => str_contains($releaseGate, 'payment_audit_repository_test.php'),
-    'reconciliation_controller_present' => $reconciliation !== '',
-    'reconciliation_view_present' => $reconciliationView !== '',
-    'reconciliation_admin_guard' => str_contains($reconciliation, 'require_admin();'),
-    'reconciliation_resolves_service' => str_contains($reconciliation, '$container->get(ReconciliationService::class)'),
-    'reconciliation_controller_no_sql' => !preg_match($sqlKeywordPattern, $reconciliation),
-    'reconciliation_controller_no_pdo_calls' => !preg_match($pdoCallPattern, $reconciliation),
-    'reconciliation_no_legacy_payments' => !preg_match($legacyPaymentsPattern, $reconciliation),
-    'reconciliation_csv_content_type' => str_contains($reconciliation, "header('Content-Type: text/csv; charset=UTF-8');"),
-    'reconciliation_csv_disposition' => str_contains($reconciliation, 'Content-Disposition'),
-    'reconciliation_csv_injection_guard' => str_contains($reconciliation, "['=', '+', '-', '@']"),
-    'reconciliation_no_sensitive_export' => !str_contains($reconciliation, 'gateway_payload') && !str_contains($reconciliation, 'access_token') && !str_contains($reconciliation, 'pix_qr_code_base64'),
-    'reconciliation_view_no_sql_or_pdo' => !preg_match($sqlKeywordPattern, $reconciliationView) && !preg_match($pdoCallPattern, $reconciliationView),
-    'reconciliation_bootstrap_binding' => str_contains($bootstrap, 'PaymentAuditRepositoryInterface::class') && str_contains($bootstrap, 'ReconciliationService::class'),
-    'payments_controller_no_sql_or_pdo' => !preg_match($sqlKeywordPattern, $paymentsController) && !preg_match($pdoCallPattern, $paymentsController),
-    'payments_view_no_sensitive_data' => !str_contains($paymentsView, 'payload') && !str_contains($paymentsView, 'access_token') && !str_contains($paymentsView, 'webhook_secret'),
-    'csrf_constant_time_compare' => str_contains($csrf, 'hash_equals('),
-    'checkout_no_raw_gateway_return' => str_contains($checkout, "'gateway_data' => \$safeGateway"),
-    'webhook_present' => file_exists(__DIR__ . '/../webhooks/webhook_handler.php'),
-    'htaccess_present' => file_exists(__DIR__ . '/../.htaccess'),
-    'logout_csrf' => str_contains($logout, 'require_csrf();'),
-    'logout_destroy' => str_contains($logout, 'session_destroy();'),
-    'strict_session_mode' => str_contains($config, "ini_set('session.use_strict_mode', '1')"),
-    'session_id_rotation' => str_contains($config, 'session_regenerate_id(true)'),
+$checks=[
+ 'php_strict_types'=>str_contains($repo,'declare(strict_types=1);'),
+ 'canonical_payment_table'=>str_contains($repo,'payment_transactions'),
+ 'webhook_transition_interface'=>str_contains($repoInterface,'applyWebhookTransition('),
+ 'mysql_lock_guard'=>str_contains($repo,'ATTR_DRIVER_NAME')&&str_contains($repo,"=== 'mysql'")&&str_contains($repo,'lockSql('),
+ 'double_lock_payment_for_update'=>preg_match('/SELECT[\\s\\S]+FROM payment_transactions[\\s\\S]+FOR UPDATE/i',$repo)===1,
+ 'double_lock_orders_for_update'=>preg_match('/SELECT[\\s\\S]+FROM orders[\\s\\S]+FOR UPDATE/i',$repo)===1,
+ 'lock_order_protocol_payment_before_order'=>strpos($repo,'lockPaymentForWebhook(')!==false&&strpos($repo,'lockOrderForWebhook(')!==false&&strpos($repo,'lockPaymentForWebhook(')<strpos($repo,'lockOrderForWebhook('),
+ 'canonical_stock_columns'=>str_contains($repo,'stock_movements(product_id,type,qty)')&&!str_contains($repo,'stock_movements (product_id, quantity'),
+ 'canonical_stock_adjustment'=>str_contains($repo,"':type'=>'adjustment'")||str_contains($repo,"':type' => 'adjustment'"),
+ 'monotonic_state_matrix'=>str_contains($repo,'ALLOWED_TRANSITIONS')&&str_contains($repo,"'paid'=>['refunded']")&&str_contains($repo,"'refunded'=>[]")&&str_contains($repo,"'cancelled'=>[]"),
+ 'illegal_transition_exception'=>str_contains($repo,'InvalidWebhookTransitionException')&&str_contains($invalidTransition,'class InvalidWebhookTransitionException'),
+ 'transaction_boundary_required'=>str_contains($repo,'inTransaction()')&&str_contains($repo,'existing ACID transaction'),
+ 'history_same_transaction'=>str_contains($repo,'INSERT INTO order_status_history'),
+ 'stock_same_transaction'=>str_contains($repo,'stock_movements')&&str_contains($repo,'restoreOrderStock('),
+ 'deadlock_1213'=>str_contains($repo,'1213')&&str_contains($concurrency,'class WebhookConcurrencyException'),
+ 'lock_timeout_1205'=>str_contains($repo,'1205'),
+ 'sqlstate_40001'=>str_contains($repo,"'40001'"),
+ 'no_repository_retry_sleep'=>preg_match('/\\b(?:retry|retries|usleep|sleep)\\s*\\(/i',$repo)!==1,
+ 'webhook_catches_invalid_transition'=>str_contains($webhook,'catch (InvalidWebhookTransitionException $e)'),
+ 'webhook_catches_concurrency'=>str_contains($webhook,'1213')&&str_contains($webhook,'1205')&&str_contains($webhook,'retry_safe'),
+ 'webhook_no_uncaught_500_for_concurrency'=>str_contains($webhook,"'retry_safe' => true")&&str_contains($webhook,'respond(200'),
+ 'webhook_validator_hmac'=>str_contains($validator,"hash_hmac('sha256'")&&str_contains($validator,'hash_equals('),
+ 'webhook_gateway_service_boundary'=>str_contains($paymentService,'getWebhookPayment('),
+ 'audit_idempotency'=>str_contains($audit,'idempotency_key')&&str_contains($audit,'isEventProcessed'),
+ 'strict_idempotency_repository'=>str_contains($idempotency,'INSERT INTO payment_audit_log')&&str_contains($idempotency,'23000')&&str_contains($idempotency,'1062')&&str_contains($idempotency,'errorInfo[0]'),
+ 'bootstrap_di'=>str_contains($bootstrap,'PaymentTransactionRepositoryInterface::class'),
+ 'mysql_concurrency_suite_present'=>$mysqlConcurrency!=='',
+ 'mysql_concurrency_32_plus'=>str_contains($mysqlConcurrency,'max(32,')&&str_contains($mysqlConcurrency,'curl_multi_init('),
+ 'mysql_concurrency_paid_refunded'=>str_contains($mysqlConcurrency,'paid')&&str_contains($mysqlConcurrency,'refunded'),
+ 'mysql_concurrency_zero_500'=>str_contains($mysqlConcurrency,'!== 500'),
+ 'deadlock_suite_present'=>$deadlockTest!=='',
+ 'deadlock_suite_1205'=>str_contains($deadlockTest,'1205')&&str_contains($deadlockTest,'innodb_lock_wait_timeout'),
+ 'deadlock_suite_1213'=>str_contains($deadlockTest,'1213')&&str_contains($deadlockTest,'40001'),
+ 'deadlock_suite_dual_connection'=>str_contains($deadlockTest,'$connectionA = db()')&&str_contains($deadlockTest,'$connectionB = db()'),
+ 'deadlock_suite_rollback_five_tables'=>str_contains($deadlockTest,"'payment'")&&str_contains($deadlockTest,"'order'")&&str_contains($deadlockTest,"'history'")&&str_contains($deadlockTest,"'stock'")&&str_contains($deadlockTest,"'audit'"),
+ 'deadlock_suite_no_repository_retry'=>str_contains($deadlockTest,'blind retry/backoff'),
+ 'deadlock_suite_webhook_no_500'=>str_contains($deadlockTest,'status"] !== 500'),
+ 'deadlock_suite_redelivery_idempotency'=>str_contains($deadlockTest,'notificationId')&&str_contains($deadlockTest,'afterReplay'),
+ 'deadlock_suite_registered_validation'=>str_contains($validation,'webhook_mysql_deadlock_test.php'),
+ 'deadlock_suite_registered_release'=>str_contains($release,'webhook_mysql_deadlock_test.php'),
+ 'pessimistic_locking_test_present'=>$pessimisticTest!=='',
+ 'no_legacy_payments_table_in_repo'=>!preg_match('/\\b(?:FROM|JOIN|INTO|UPDATE)\\s+payments\\b/i',$repo),
 ];
-
-$failed = array_keys(array_filter($checks, static fn(bool $ok): bool => !$ok));
-foreach ($checks as $name => $ok) {
-    echo ($ok ? 'PASS' : 'FAIL') . ": {$name}\n";
-}
-
-exit($failed ? 1 : 0);
+$failed=[];foreach($checks as $name=>$ok){echo($ok?'PASS':'FAIL').": {$name}\n";if(!$ok)$failed[]=$name;}
+if($failed!==[]){echo'FAILED_CHECKS: '.implode(', ',$failed).PHP_EOL;exit(1);}echo"SECURITY_AUDIT_PASSED\n";

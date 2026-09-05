@@ -21,6 +21,44 @@ jobs:
       fail-fast: false
       matrix:
         php: ['8.2', '8.3', '8.4']
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: cm_comercial
+          MYSQL_USER: cm_comercial
+          MYSQL_PASSWORD: cm_comercial
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
+    env:
+      DB_DSN: mysql:host=127.0.0.1;port=3306;dbname=cm_comercial;charset=utf8mb4
+      DB_USER: cm_comercial
+      DB_PASSWORD: cm_comercial
+      CM_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=cm_comercial;charset=utf8mb4
+      CM_MYSQL_HOST: 127.0.0.1
+      CM_MYSQL_PORT: 3306
+      CM_MYSQL_DATABASE: cm_comercial
+      CM_MYSQL_USER: cm_comercial
+      CM_MYSQL_PASSWORD: cm_comercial
+      CM_MYSQL_CHARSET: utf8mb4
+      CM_MYSQL_EXTERNAL_REFERENCE: '1'
+      CM_MYSQL_PROVIDER_PAYMENT_ID_PAID: '900001'
+      CM_MYSQL_PROVIDER_PAYMENT_ID_REFUNDED: '900002'
+      CM_MYSQL_STRESS_REQUESTS: '32'
+      CM_MYSQL_CONCURRENCY_TIMEOUT: '45'
+      CM_MYSQL_EXPECTED_STOCK_MOVEMENT_DELTA: '1'
+      CM_WEBHOOK_URL: http://127.0.0.1:8081/webhooks/webhook_handler.php
+      MP_WEBHOOK_SECRET: ci-webhook-secret
+      MP_WEBHOOK_MAX_SKEW: '300'
+      MP_ACCESS_TOKEN: ci-test-token
+      MP_API_BASE: http://127.0.0.1:8080/v1
 
     steps:
       - name: Checkout
@@ -30,29 +68,92 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_sqlite
+          extensions: pdo, pdo_mysql, pdo_sqlite, curl
           coverage: none
+
+      - name: Wait for MySQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..60}; do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -ucm_comercial -pcm_comercial --silent; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Install schema and deterministic fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -P 3306 -ucm_comercial -pcm_comercial cm_comercial < CM-Comercial/database/schema.sql
+          mysql -h 127.0.0.1 -P 3306 -ucm_comercial -pcm_comercial cm_comercial <<'SQL'
+          CREATE TABLE IF NOT EXISTS users (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            name VARCHAR(180) NOT NULL,
+            email VARCHAR(255) NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_users_email (email)
+          ) ENGINE=InnoDB;
+          INSERT INTO users (id,name,email) VALUES (1,'CI Customer','ci@example.test') ON DUPLICATE KEY UPDATE name=VALUES(name);
+          INSERT INTO products (id,sku,name,price,stock_quantity,active) VALUES (1,'CI-001','CI Product',100.00,0,1) ON DUPLICATE KEY UPDATE price=VALUES(price),active=VALUES(active);
+          INSERT INTO orders (id,customer_id,status,payment_status,total_amount,currency,shipping_amount,idempotency_key) VALUES (1,1,'pending','pending',100.00,'BRL',0,'ci-order-1') ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id),status='pending',payment_status='pending',total_amount=100.00;
+          INSERT INTO order_items (id,order_id,product_id,sku,product_name,unit_price,quantity) VALUES (1,1,1,'CI-001','CI Product',100.00,1) ON DUPLICATE KEY UPDATE quantity=1,unit_price=100.00;
+          INSERT INTO payment_transactions (id,order_id,provider,provider_payment_id,external_reference,idempotency_key,status,amount,currency) VALUES (1,1,'mercadopago',NULL,'1','ci-payment-1','pending',100.00,'BRL') ON DUPLICATE KEY UPDATE provider='mercadopago',provider_payment_id=NULL,external_reference='1',status='pending',amount=100.00;
+          SQL
 
       - name: Install Composer dependencies
         working-directory: CM-Comercial
         run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Start deterministic provider stub
+        run: php -S 127.0.0.1:8080 CM-Comercial/tests/mock_mercadopago.php > /tmp/cm-mp.log 2>&1 &
+
+      - name: Start CM webhook server
+        run: php -S 127.0.0.1:8081 -t CM-Comercial > /tmp/cm-webhook.log 2>&1 &
+
+      - name: Wait for webhook server
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            if ! kill -0 "$(pgrep -f 'php -S 127.0.0.1:8081' | head -n1)" 2>/dev/null; then
+              sleep 1
+              continue
+            fi
+            code="$(curl -sS -o /tmp/cm-webhook-probe.out -w '%{http_code}' -X POST http://127.0.0.1:8081/webhooks/webhook_handler.php || true)"
+            if [[ "$code" =~ ^(401|422|200|405)$ ]]; then exit 0; fi
+            sleep 1
+          done
+          echo '--- webhook server log ---'
+          cat /tmp/cm-webhook.log || true
+          echo '--- provider stub log ---'
+          cat /tmp/cm-mp.log || true
+          exit 1
 
       - name: PHP syntax check
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t files < <(find CM-Comercial -type f -name '*.php' ! -path 'CM-Comercial/.git/*' ! -path 'CM-Comercial/vendor/*')
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo 'No PHP files found.'
-            exit 1
-          fi
+          if [ "${#files[@]}" -eq 0 ]; then exit 1; fi
           for file in "${files[@]}"; do php -l "$file"; done
 
       - name: Enterprise architecture smoke test
         run: php CM-Comercial/tests/enterprise_architecture_test.php
 
-      - name: Run deterministic validation runner
+      - name: MySQL deadlock integration
+        working-directory: CM-Comercial
+        run: php tests/webhook_mysql_deadlock_test.php
+
+      - name: MySQL concurrency integration
+        working-directory: CM-Comercial
+        run: php tests/webhook_mysql_concurrency_test.php
+
+      - name: Deterministic validation runner
         run: php CM-Comercial/tests/validation_runner.php
+
+      - name: Security audit
+        run: php CM-Comercial/tests/security_audit.php
 
       - name: Verify release consistency
         run: php CM-Comercial/tests/release_consistency.php

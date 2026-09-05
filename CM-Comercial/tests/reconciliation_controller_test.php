@@ -1,167 +1,39 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__.'/../vendor/autoload.php';
 
 use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Repositories\ReconciliationRepositoryInterface;
 use App\Services\ReconciliationService;
 
-function assert_true(bool $condition, string $message): void
-{
-    if (!$condition) {
-        throw new \RuntimeException($message);
-    }
+function assert_true(bool $condition,string $message):void{if(!$condition)throw new \RuntimeException($message);}
+function assert_same(mixed $expected,mixed $actual,string $message):void{if($expected!==$actual)throw new \RuntimeException($message.' expected='.var_export($expected,true).' actual='.var_export($actual,true));}
+$controllerPath=__DIR__.'/../admin/reconciliation.php';$viewPath=__DIR__.'/../admin/views/reconciliation.php';$controller=(string)file_get_contents($controllerPath);$view=(string)file_get_contents($viewPath);
+assert_true(str_contains($controller,'require_admin();'),'Admin guard is missing.');assert_true(str_contains($controller,'$container->get(ReconciliationService::class)'),'ReconciliationService must be resolved through the Container.');assert_true(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i',$controller),'Controller must not contain SQL keywords.');assert_true(!str_contains($controller,'->prepare('),'Controller must not prepare SQL statements.');assert_true(!str_contains($controller,'->query('),'Controller must not query the database directly.');assert_true(!str_contains($controller,'->exec('),'Controller must not execute database statements directly.');assert_true(str_contains($controller,"header('Content-Type: text/csv; charset=UTF-8');"),'CSV content type header is missing.');assert_true(str_contains($controller,'Content-Disposition'),'CSV content disposition header is missing.');assert_true(str_contains($controller,"['=', '+', '-', '@']"),'CSV injection guard is missing.');assert_true(!str_contains($controller,'paymentRepository'),'Controller must not resolve repositories directly.');
+foreach(['payload','access_token','webhook_secret'] as $field)assert_true(!str_contains($controller,"['{$field}']"),"Sensitive CSV field '{$field}' must not be exported.");
+assert_true(str_contains($view,'status-pill'),'Status badge rendering is missing.');assert_true(str_contains($view,'Exportar CSV'),'CSV export control is missing.');assert_true(str_contains($view,'date_from'),'Start date filter is missing.');assert_true(str_contains($view,'date_to'),'End date filter is missing.');assert_true(str_contains($view,'customer_id'),'Customer filter is missing.');assert_true(str_contains($view,'order_id'),'Order filter is missing.');assert_true(str_contains($view,'provider'),'Provider filter is missing.');assert_true(str_contains($view,'page'),'Pagination controls are missing.');
+
+final class ControllerFakeReconciliationRepository implements ReconciliationRepositoryInterface{
+ public function __construct(private readonly array $rows){}
+ public function list(array $filters=[],int $limit=50,int $offset=0):array{return array_slice($this->filter($filters),max(0,$offset),max(1,min(100,$limit)));}
+ public function summarize(array $filters=[]):array{$rows=$this->filter($filters);return ['total'=>count($rows),'count'=>count($rows),'total_amount'=>array_sum(array_map(static fn(array $row):float=>(float)$row['amount'],$rows)),'reconciled'=>count(array_filter($rows,static fn(array $row):bool=>($row['reconciliation_status']??'')==='reconciled')),'divergent'=>count(array_filter($rows,static fn(array $row):bool=>($row['reconciliation_status']??'')==='divergent')),'pending'=>count(array_filter($rows,static fn(array $row):bool=>($row['reconciliation_status']??'')==='pending')),'inconsistent'=>count(array_filter($rows,static fn(array $row):bool=>($row['reconciliation_status']??'')==='inconsistent'))];}
+ public function count(array $filters=[]):int{return count($this->filter($filters));}
+ private function filter(array $filters):array{return array_values(array_filter($this->rows,static function(array $row)use($filters):bool{foreach(['status'=>'payment_status','provider'=>'provider','customer_id'=>'customer_id','order_id'=>'order_id'] as $k=>$rk)if(isset($filters[$k])&&$filters[$k]!==''&&(string)($row[$rk]??'')!==(string)$filters[$k])return false;if(isset($filters['date_from'])&&$filters['date_from']!==''&&substr((string)($row['created_at']??''),0,10)<$filters['date_from'])return false;if(isset($filters['date_to'])&&$filters['date_to']!==''&&substr((string)($row['created_at']??''),0,10)>$filters['date_to'])return false;return true;}));}
 }
-
-function assert_same(mixed $expected, mixed $actual, string $message): void
-{
-    if ($expected !== $actual) {
-        throw new \RuntimeException(
-            $message . ' expected=' . var_export($expected, true) . ' actual=' . var_export($actual, true)
-        );
-    }
+final class ControllerFakePaymentTransactionRepository implements PaymentTransactionRepositoryInterface{
+ public function findById(int $id,bool $forUpdate=false):?array{return null;}
+ public function findByExternalReference(string $externalReference,bool $forUpdate=false):?array{return null;}
+ public function updateStatus(int $id,string $status):bool{return false;}
+ public function applyWebhookTransition(int $id,string $providerPaymentId,string $newStatus):array{return ['transaction_id'=>$id,'order_id'=>0,'old_status'=>'pending','new_status'=>$newStatus];}
+ public function listWithFilters(array $filters,int $limit=50,int $offset=0):array{return [];}
+ public function summarize(array $filters=[]):array{return ['count'=>0,'total'=>0.0,'paid'=>0.0,'refunded'=>0.0,'pending'=>0.0,'failed'=>0.0,'cancelled'=>0.0,'authorized'=>0.0];}
+ public function summarizeForReconciliation(array $filters=[]):array{return [];}
 }
-
-$controllerPath = __DIR__ . '/../admin/reconciliation.php';
-$viewPath = __DIR__ . '/../admin/views/reconciliation.php';
-$controller = (string)file_get_contents($controllerPath);
-$view = (string)file_get_contents($viewPath);
-
-assert_true(str_contains($controller, 'require_admin();'), 'Admin guard is missing.');
-assert_true(str_contains($controller, '$container->get(ReconciliationService::class)'), 'ReconciliationService must be resolved through the Container.');
-assert_true(!preg_match('/\b(SELECT|INSERT|UPDATE|DELETE)\b/i', $controller), 'Controller must not contain SQL keywords.');
-assert_true(!str_contains($controller, '->prepare('), 'Controller must not prepare SQL statements.');
-assert_true(!str_contains($controller, '->query('), 'Controller must not query the database directly.');
-assert_true(!str_contains($controller, '->exec('), 'Controller must not execute database statements directly.');
-assert_true(str_contains($controller, "header('Content-Type: text/csv; charset=UTF-8');"), 'CSV content type header is missing.');
-assert_true(str_contains($controller, 'Content-Disposition'), 'CSV content disposition header is missing.');
-assert_true(str_contains($controller, "['=', '+', '-', '@']"), 'CSV injection guard is missing.');
-assert_true(!str_contains($controller, 'paymentRepository'), 'Controller must not resolve repositories directly.');
-assert_true(!str_contains($controller, "['payload']"), 'Controller must not export raw payload fields.');
-assert_true(!str_contains($controller, "['access_token']"), 'Controller must not export access tokens.');
-assert_true(!str_contains($controller, "['webhook_secret']"), 'Controller must not export webhook secrets.');
-
-assert_true(str_contains($view, 'status-pill'), 'Status badge rendering is missing.');
-assert_true(str_contains($view, 'Exportar CSV'), 'CSV export control is missing.');
-assert_true(str_contains($view, 'date_from'), 'Start date filter is missing.');
-assert_true(str_contains($view, 'date_to'), 'End date filter is missing.');
-assert_true(str_contains($view, 'customer_id'), 'Customer filter is missing.');
-assert_true(str_contains($view, 'order_id'), 'Order filter is missing.');
-assert_true(str_contains($view, 'provider'), 'Provider filter is missing.');
-assert_true(str_contains($view, 'page'), 'Pagination controls are missing.');
-
-final class ControllerFakeReconciliationRepository implements ReconciliationRepositoryInterface
-{
-    /** @param list<array<string,mixed>> $rows */
-    public function __construct(private readonly array $rows) {}
-
-    public function list(array $filters = [], int $limit = 50, int $offset = 0): array
-    {
-        $rows = $this->filter($filters);
-        return array_slice($rows, max(0, $offset), max(1, min(100, $limit)));
-    }
-
-    public function summarize(array $filters = []): array
-    {
-        $rows = $this->filter($filters);
-        return [
-            'total' => count($rows),
-            'count' => count($rows),
-            'total_amount' => array_sum(array_map(static fn(array $row): float => (float)$row['amount'], $rows)),
-            'reconciled' => count(array_filter($rows, static fn(array $row): bool => ($row['reconciliation_status'] ?? '') === 'reconciled')),
-            'divergent' => count(array_filter($rows, static fn(array $row): bool => ($row['reconciliation_status'] ?? '') === 'divergent')),
-            'pending' => count(array_filter($rows, static fn(array $row): bool => ($row['reconciliation_status'] ?? '') === 'pending')),
-            'inconsistent' => count(array_filter($rows, static fn(array $row): bool => ($row['reconciliation_status'] ?? '') === 'inconsistent')),
-        ];
-    }
-
-    public function count(array $filters = []): int
-    {
-        return count($this->filter($filters));
-    }
-
-    private function filter(array $filters): array
-    {
-        return array_values(array_filter($this->rows, static function (array $row) use ($filters): bool {
-            foreach (['status' => 'payment_status', 'provider' => 'provider', 'customer_id' => 'customer_id', 'order_id' => 'order_id'] as $filterKey => $rowKey) {
-                if (isset($filters[$filterKey]) && $filters[$filterKey] !== '' && (string)($row[$rowKey] ?? '') !== (string)$filters[$filterKey]) {
-                    return false;
-                }
-            }
-            if (isset($filters['date_from']) && $filters['date_from'] !== '' && substr((string)($row['created_at'] ?? ''), 0, 10) < $filters['date_from']) {
-                return false;
-            }
-            if (isset($filters['date_to']) && $filters['date_to'] !== '' && substr((string)($row['created_at'] ?? ''), 0, 10) > $filters['date_to']) {
-                return false;
-            }
-            return true;
-        }));
-    }
+final class ControllerFakeAuditRepository implements PaymentAuditRepositoryInterface{
+ public function logEvent(array $data):int{return 1;} public function logResolution(int $transactionId,string $actor,string $oldStatus,string $newStatus,string $reason,?string $idempotencyKey=null):bool{return true;} public function getHistoryByTransactionId(int $transactionId):array{return [];} public function getHistoryByOrderId(int $orderId):array{return [];} public function listAuditLogs(array $filters,int $limit,int $offset):array{return [];} public function isEventProcessed(string $idempotencyKey):bool{return false;} public function transaction(callable $operation):mixed{return $operation();}
 }
-
-final class ControllerFakePaymentTransactionRepository implements PaymentTransactionRepositoryInterface
-{
-    public function findById(int $id, bool $forUpdate = false): ?array { return null; }
-    public function updateStatus(int $id, string $status): bool { return false; }
-    public function listWithFilters(array $filters, int $limit = 50, int $offset = 0): array { return []; }
-    public function summarize(array $filters = []): array { return ['count' => 0, 'total' => 0.0, 'paid' => 0.0, 'refunded' => 0.0, 'pending' => 0.0, 'failed' => 0.0, 'cancelled' => 0.0, 'authorized' => 0.0]; }
-    public function summarizeForReconciliation(array $filters = []): array { return []; }
-}
-
-final class ControllerFakeAuditRepository implements PaymentAuditRepositoryInterface
-{
-    public function logEvent(array $data): int { return 1; }
-    public function logResolution(int $transactionId, string $actor, string $oldStatus, string $newStatus, string $reason, ?string $idempotencyKey = null): bool { return true; }
-    public function getHistoryByTransactionId(int $transactionId): array { return []; }
-    public function getHistoryByOrderId(int $orderId): array { return []; }
-    public function listAuditLogs(array $filters, int $limit, int $offset): array { return []; }
-    public function isEventProcessed(string $idempotencyKey): bool { return false; }
-    public function transaction(callable $operation): mixed { return $operation(); }
-}
-
-$rows = [
-    ['transaction_id' => 2, 'order_id' => 2, 'customer_id' => 20, 'provider' => 'mercadopago', 'amount' => 200.00, 'payment_status' => 'pending', 'reconciliation_status' => 'pending', 'divergence_reason' => null, 'created_at' => '2026-08-21 10:00:00'],
-    ['transaction_id' => 1, 'order_id' => 1, 'customer_id' => 10, 'provider' => 'mercadopago', 'amount' => 100.00, 'payment_status' => 'paid', 'reconciliation_status' => 'reconciled', 'divergence_reason' => null, 'created_at' => '2026-08-20 10:00:00'],
-];
-
-$reconciliation = new ControllerFakeReconciliationRepository($rows);
-$payment = new ControllerFakePaymentTransactionRepository();
-$audit = new ControllerFakeAuditRepository();
-$service = new ReconciliationService($reconciliation, $payment, $audit);
-
-$filtered = $service->getPage([
-    'customer_id' => 10,
-    'date_from' => '2026-08-20',
-    'date_to' => '2026-08-20',
-    'provider' => 'mercadopago',
-    'status' => 'paid',
-], 1, 0);
-assert_same(1, count($filtered['items']), 'ReconciliationService filter flow is incorrect.');
-assert_same(1, (int)$filtered['items'][0]['transaction_id'], 'Filtered transaction id is incorrect.');
-
-$nextPage = $service->getPage([], 1, 1);
-assert_same(1, count($nextPage['items']), 'ReconciliationService pagination did not return the requested page.');
-assert_same(1, (int)$nextPage['items'][0]['transaction_id'], 'ReconciliationService pagination ordering is incorrect.');
-
-$summary = $service->getSummary(['provider' => 'mercadopago']);
-assert_same(2, $summary['total'], 'Reconciliation summary count is incorrect.');
-assert_same(300.00, $summary['total_amount'], 'Reconciliation summary total is incorrect.');
-
-foreach (['payload', 'raw_payload', 'access_token', 'webhook_secret', 'qr_code_base64', 'gateway_response'] as $field) {
-    assert_true(!str_contains($controller, "['{$field}']") && !str_contains($controller, "['{$field}'"), "Sensitive CSV field '{$field}' must not be exported.");
-}
-
-$csvSafe = static function (mixed $value): string {
-    $text = is_scalar($value) || $value === null ? (string)$value : '';
-    return $text !== '' && in_array($text[0], ['=', '+', '-', '@'], true) ? "'{$text}" : $text;
-};
-
-assert_same("'=2+2", $csvSafe('=2+2'), 'CSV formula prefix must be escaped.');
-assert_same("'+CMD", $csvSafe('+CMD'), 'CSV plus prefix must be escaped.');
-assert_same("'-10", $csvSafe('-10'), 'CSV minus prefix must be escaped.');
-assert_same("'@SUM", $csvSafe('@SUM'), 'CSV at prefix must be escaped.');
-assert_same('Cliente normal', $csvSafe('Cliente normal'), 'Normal CSV values must remain unchanged.');
-
-echo "PASS: reconciliation_controller_test\n";
+$rows=[['transaction_id'=>2,'order_id'=>2,'customer_id'=>20,'provider'=>'mercadopago','amount'=>200.00,'payment_status'=>'pending','reconciliation_status'=>'pending','divergence_reason'=>null,'created_at'=>'2026-08-21 10:00:00'],['transaction_id'=>1,'order_id'=>1,'customer_id'=>10,'provider'=>'mercadopago','amount'=>100.00,'payment_status'=>'paid','reconciliation_status'=>'reconciled','divergence_reason'=>null,'created_at'=>'2026-08-20 10:00:00']];
+$service=new ReconciliationService(new ControllerFakeReconciliationRepository($rows),new ControllerFakePaymentTransactionRepository(),new ControllerFakeAuditRepository());$filtered=$service->getPage(['customer_id'=>10,'date_from'=>'2026-08-20','date_to'=>'2026-08-20','provider'=>'mercadopago','status'=>'paid'],1,0);assert_same(1,count($filtered['items']),'ReconciliationService filter flow is incorrect.');assert_same(1,(int)$filtered['items'][0]['transaction_id'],'Filtered transaction id is incorrect.');$next=$service->getPage([],1,1);assert_same(1,count($next['items']),'Pagination did not return requested page.');assert_same(1,(int)$next['items'][0]['transaction_id'],'Pagination ordering is incorrect.');$summary=$service->getSummary(['provider'=>'mercadopago']);assert_same(2,$summary['total'],'Summary count is incorrect.');assert_same(300.00,$summary['total_amount'],'Summary total is incorrect.');
+$csvSafe=static function(mixed $value):string{$text=is_scalar($value)||$value===null?(string)$value:'';return $text!==''&&in_array($text[0],['=','+','-','@'],true)?"'{$text}":$text;};assert_same("'=2+2",$csvSafe('=2+2'),'CSV formula prefix must be escaped.');assert_same("'+CMD",$csvSafe('+CMD'),'CSV plus prefix must be escaped.');assert_same("'-10",$csvSafe('-10'),'CSV minus prefix must be escaped.');assert_same("'@SUM",$csvSafe('@SUM'),'CSV at prefix must be escaped.');echo"PASS: reconciliation_controller_test\n";

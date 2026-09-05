@@ -9,6 +9,7 @@ use App\Gateways\MercadoPagoGateway;
 use App\Gateways\PaymentGatewayInterface;
 use App\Repositories\OrderRepository;
 use App\Repositories\OrderRepositoryInterface;
+use App\Repositories\PaymentAuditIdempotencyRepository;
 use App\Repositories\PaymentAuditRepository;
 use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepository;
@@ -43,7 +44,10 @@ $container->singleton(ProductRepositoryInterface::class, static fn (Container $c
 $container->singleton(PaymentTransactionRepository::class, static fn (Container $c): PaymentTransactionRepository => new PaymentTransactionRepository($c->get(PDO::class)));
 $container->singleton(PaymentTransactionRepositoryInterface::class, static fn (Container $c): PaymentTransactionRepositoryInterface => $c->get(PaymentTransactionRepository::class));
 $container->singleton(PaymentAuditRepository::class, static fn (Container $c): PaymentAuditRepository => new PaymentAuditRepository($c->get(PDO::class)));
-$container->singleton(PaymentAuditRepositoryInterface::class, static fn (Container $c): PaymentAuditRepositoryInterface => $c->get(PaymentAuditRepository::class));
+$container->singleton(PaymentAuditRepositoryInterface::class, static fn (Container $c): PaymentAuditRepositoryInterface => new PaymentAuditIdempotencyRepository(
+    $c->get(PDO::class),
+    $c->get(PaymentAuditRepository::class)
+));
 $container->singleton(ReconciliationRepository::class, static fn (Container $c): ReconciliationRepository => new ReconciliationRepository($c->get(PDO::class)));
 $container->singleton(ReconciliationRepositoryInterface::class, static fn (Container $c): ReconciliationRepositoryInterface => $c->get(ReconciliationRepository::class));
 
