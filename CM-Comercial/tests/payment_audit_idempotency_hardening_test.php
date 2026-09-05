@@ -1,82 +1,15 @@
 <?php
 declare(strict_types=1);
-
-require_once __DIR__ . '/../vendor/autoload.php';
-
-use App\Exceptions\IdempotencyConflictException;
-use App\Repositories\PaymentAuditIdempotencyRepository;
-use App\Repositories\PaymentAuditRepository;
-
-final class PaymentAuditIdempotencyHardeningFailure extends RuntimeException {}
-function hardAssert(bool $condition, string $message): void { if (!$condition) throw new PaymentAuditIdempotencyHardeningFailure($message); }
-
-$pdo = new PDO('sqlite::memory:');
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$pdo->exec(<<<'SQL'
-CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT NOT NULL, total_amount NUMERIC NOT NULL);
-CREATE TABLE payment_transactions (
-    id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, status TEXT NOT NULL, amount NUMERIC NOT NULL,
-    provider TEXT NOT NULL, provider_payment_id TEXT NULL, external_reference TEXT NOT NULL,
-    idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-);
-CREATE TABLE payment_audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, payment_transaction_id INTEGER NOT NULL, event_type TEXT NOT NULL,
-    old_status TEXT NULL, new_status TEXT NULL, actor TEXT NOT NULL, payload TEXT NULL,
-    idempotency_key TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-SQL);
-$pdo->exec("INSERT INTO orders VALUES (10, 'pending', 100.00)");
-$pdo->exec("INSERT INTO payment_transactions VALUES (100, 10, 'pending', 100.00, 'mercadopago', '1000', 'order-10', 'pay-100', datetime('now'), datetime('now'))");
-
-$base = new PaymentAuditRepository($pdo);
-$strict = new PaymentAuditIdempotencyRepository($pdo, $base);
-
-$first = $strict->logEvent([
-    'payment_transaction_id' => 100,
-    'event_type' => 'webhook.payment_updated',
-    'old_status' => 'pending',
-    'new_status' => 'paid',
-    'actor' => 'webhook:mercadopago',
-    'idempotency_key' => 'race-100',
-    'payload' => ['notification_id' => 'n-100', 'access_token' => 'MUST_NOT_PERSIST', 'gateway_payload' => ['x' => 'MUST_NOT_PERSIST']],
-]);
-hardAssert($first > 0, 'First audit event was not persisted.');
-hardAssert((int)$pdo->query("SELECT COUNT(*) FROM payment_audit_log WHERE idempotency_key = 'race-100'")->fetchColumn() === 1, 'Expected one audit row after first event.');
-
-$collision = false;
-try {
-    $strict->transaction(function () use ($strict, $pdo): void {
-        $pdo->exec("UPDATE orders SET status = 'confirmed' WHERE id = 10");
-        $strict->logEvent([
-            'payment_transaction_id' => 100,
-            'event_type' => 'webhook.payment_updated',
-            'old_status' => 'pending',
-            'new_status' => 'paid',
-            'actor' => 'webhook:mercadopago',
-            'idempotency_key' => 'race-100',
-        ]);
-    });
-} catch (IdempotencyConflictException) {
-    $collision = true;
-}
-hardAssert($collision, 'Existing idempotency key must raise IdempotencyConflictException.');
-hardAssert((string)$pdo->query("SELECT status FROM orders WHERE id = 10")->fetchColumn() === 'pending', 'Losing transaction mutation was not rolled back.');
-hardAssert((int)$pdo->query("SELECT COUNT(*) FROM payment_audit_log WHERE idempotency_key = 'race-100'")->fetchColumn() === 1, 'Duplicate audit row was created.');
-
-$duplicate = new PDOException('Duplicate entry');
-$duplicate->errorInfo = ['23000', 1062, 'Duplicate entry for key payment_audit_log.idempotency_key'];
-$reflection = new ReflectionMethod(PaymentAuditIdempotencyRepository::class, 'isMySqlDuplicateEntry');
-$reflection->setAccessible(true);
-hardAssert($reflection->invoke($strict, $duplicate) === true, 'MySQL SQLSTATE 23000 / error 1062 must be classified as duplicate.');
-
-$history = json_encode($base->getHistoryByTransactionId(100), JSON_THROW_ON_ERROR);
-hardAssert(!str_contains($history, 'MUST_NOT_PERSIST'), 'Sensitive audit data leaked.');
-hardAssert(!str_contains($history, 'access_token'), 'Sensitive audit key leaked.');
-hardAssert(!str_contains($history, 'gateway_payload'), 'Raw gateway payload leaked.');
-
-$source = (string)file_get_contents(__DIR__ . '/../src/Repositories/PaymentAuditIdempotencyRepository.php');
-hardAssert(str_contains($source, "'23000'"), 'Explicit SQLSTATE 23000 handling is missing.');
-hardAssert(str_contains($source, '1062'), 'Explicit MySQL duplicate code 1062 handling is missing.');
-hardAssert(!str_contains(strtoupper($source), 'INSERT IGNORE'), 'INSERT IGNORE is forbidden.');
-
-echo "PASS: payment_audit_idempotency_hardening_test\n";
+require_once __DIR__.'/../vendor/autoload.php';
+use App\Exceptions\IdempotencyConflictException;use App\Repositories\PaymentAuditIdempotencyRepository;use App\Repositories\PaymentAuditRepository;
+final class PaymentAuditIdempotencyHardeningFailure extends RuntimeException{}function hardAssert(bool $condition,string $message):void{if(!$condition)throw new PaymentAuditIdempotencyHardeningFailure($message);}
+$pdo=new PDO('sqlite::memory:');$pdo->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);$pdo->exec(<<<'SQL'
+CREATE TABLE orders(id INTEGER PRIMARY KEY,status TEXT NOT NULL,total_amount NUMERIC NOT NULL);
+CREATE TABLE payment_transactions(id INTEGER PRIMARY KEY,order_id INTEGER NOT NULL,status TEXT NOT NULL,amount NUMERIC NOT NULL,provider TEXT NOT NULL,provider_payment_id TEXT NULL,external_reference TEXT NOT NULL,idempotency_key TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE payment_audit_log(id INTEGER PRIMARY KEY AUTOINCREMENT,payment_transaction_id INTEGER NOT NULL,event_type TEXT NOT NULL,old_status TEXT NULL,new_status TEXT NULL,actor TEXT NOT NULL,payload TEXT NULL,idempotency_key TEXT UNIQUE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+SQL);$pdo->exec("INSERT INTO orders VALUES (10,'pending',100.00)");$pdo->exec("INSERT INTO payment_transactions VALUES (100,10,'pending',100.00,'mercadopago','1000','order-10','pay-100',datetime('now'),datetime('now'))");
+$base=new PaymentAuditRepository($pdo);$strict=new PaymentAuditIdempotencyRepository($pdo,$base);$first=$strict->logEvent(['payment_transaction_id'=>100,'event_type'=>'webhook.payment_updated','old_status'=>'pending','new_status'=>'paid','actor'=>'webhook:mercadopago','idempotency_key'=>'race-100','payload'=>['notification_id'=>'n-100','access_token'=>'MUST_NOT_PERSIST','gateway_payload'=>['x'=>'MUST_NOT_PERSIST']]]);hardAssert($first>0,'First audit event was not persisted.');hardAssert((int)$pdo->query("SELECT COUNT(*) FROM payment_audit_log WHERE idempotency_key='race-100'")->fetchColumn()===1,'Expected one audit row after first event.');
+$collision=false;try{$strict->transaction(function()use($strict,$pdo):void{$pdo->exec("UPDATE orders SET status='confirmed' WHERE id=10");$strict->logEvent(['payment_transaction_id'=>100,'event_type'=>'webhook.payment_updated','old_status'=>'pending','new_status'=>'paid','actor'=>'webhook:mercadopago','idempotency_key'=>'race-100']);});}catch(IdempotencyConflictException){$collision=true;}hardAssert($collision,'Existing idempotency key must raise IdempotencyConflictException.');hardAssert((string)$pdo->query("SELECT status FROM orders WHERE id=10")->fetchColumn()==='pending','Losing transaction mutation was not rolled back.');hardAssert((int)$pdo->query("SELECT COUNT(*) FROM payment_audit_log WHERE idempotency_key='race-100'")->fetchColumn()===1,'Duplicate audit row was created.');
+$duplicate=new PDOException('Duplicate entry');$duplicate->errorInfo=['23000',1062,'Duplicate entry for key payment_audit_log.idempotency_key'];$reflection=new ReflectionMethod(PaymentAuditIdempotencyRepository::class,'isDuplicateEntry');$reflection->setAccessible(true);hardAssert($reflection->invoke($strict,$duplicate)===true,'MySQL SQLSTATE 23000 / error 1062 must be classified as duplicate.');
+$history=json_encode($base->getHistoryByTransactionId(100),JSON_THROW_ON_ERROR);hardAssert(!str_contains($history,'MUST_NOT_PERSIST'),'Sensitive audit data leaked.');hardAssert(!str_contains($history,'access_token'),'Sensitive audit key leaked.');hardAssert(!str_contains($history,'gateway_payload'),'Raw gateway payload leaked.');
+$source=(string)file_get_contents(__DIR__.'/../src/Repositories/PaymentAuditIdempotencyRepository.php');hardAssert(str_contains($source,"'23000'"),'Explicit SQLSTATE 23000 handling is missing.');hardAssert(str_contains($source,'1062'),'Explicit MySQL duplicate code 1062 handling is missing.');hardAssert(str_contains($source,'errorInfo[0]'),'Defensive PDO SQLSTATE extraction is missing.');hardAssert(!str_contains(strtoupper($source),'INSERT IGNORE'),'INSERT IGNORE is forbidden.');echo"PASS: payment_audit_idempotency_hardening_test\n";
