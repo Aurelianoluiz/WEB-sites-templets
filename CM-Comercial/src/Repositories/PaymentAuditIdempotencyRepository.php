@@ -6,7 +6,6 @@ namespace App\Repositories;
 use App\Exceptions\IdempotencyConflictException;
 use PDO;
 use PDOException;
-use Throwable;
 
 /**
  * Strict concurrency boundary for webhook audit persistence.
@@ -26,17 +25,9 @@ final class PaymentAuditIdempotencyRepository implements PaymentAuditRepositoryI
 
     public function logEvent(array $data): int
     {
-        $idempotencyKey = isset($data['idempotency_key']) && is_string($data['idempotency_key'])
-            ? trim($data['idempotency_key'])
-            : null;
-
-        if ($idempotencyKey === null || $idempotencyKey === '') {
-            return $this->delegate->logEvent($data);
-        }
-
-        if ($this->delegate->isEventProcessed($idempotencyKey)) {
-            throw new IdempotencyConflictException();
-        }
+        $idempotencyKey = isset($data['idempotency_key']) && is_string($data['idempotency_key']) ? trim($data['idempotency_key']) : null;
+        if ($idempotencyKey === null || $idempotencyKey === '') return $this->delegate->logEvent($data);
+        if ($this->delegate->isEventProcessed($idempotencyKey)) throw new IdempotencyConflictException();
 
         $transactionId = $this->positiveInt($data['payment_transaction_id'] ?? $data['transaction_id'] ?? null);
         $eventType = $this->requiredString($data['event_type'] ?? null, 100);
@@ -63,76 +54,41 @@ final class PaymentAuditIdempotencyRepository implements PaymentAuditRepositoryI
             $stmt->execute();
 
             $id = (int)$this->db->lastInsertId();
-            if ($id < 1) {
-                throw new \RuntimeException('Audit event was inserted without a valid identifier.');
-            }
+            if ($id < 1) throw new \RuntimeException('Audit event was inserted without a valid identifier.');
             return $id;
         } catch (PDOException $e) {
-            if ($this->isMySqlDuplicateEntry($e)) {
-                throw new IdempotencyConflictException(previous: $e);
-            }
+            if ($this->isDuplicateEntry($e)) throw new IdempotencyConflictException(previous: $e);
             throw $e;
         }
     }
 
-    public function logResolution(int $transactionId, string $actor, string $oldStatus, string $newStatus, string $reason, ?string $idempotencyKey = null): bool
-    {
-        return $this->delegate->logResolution($transactionId, $actor, $oldStatus, $newStatus, $reason, $idempotencyKey);
-    }
+    public function logResolution(int $transactionId, string $actor, string $oldStatus, string $newStatus, string $reason, ?string $idempotencyKey = null): bool { return $this->delegate->logResolution($transactionId, $actor, $oldStatus, $newStatus, $reason, $idempotencyKey); }
+    public function getHistoryByTransactionId(int $transactionId): array { return $this->delegate->getHistoryByTransactionId($transactionId); }
+    public function getHistoryByOrderId(int $orderId): array { return $this->delegate->getHistoryByOrderId($orderId); }
+    public function listAuditLogs(array $filters, int $limit, int $offset): array { return $this->delegate->listAuditLogs($filters, $limit, $offset); }
+    public function isEventProcessed(string $idempotencyKey): bool { return $this->delegate->isEventProcessed($idempotencyKey); }
+    public function transaction(callable $operation): mixed { return $this->delegate->transaction($operation); }
 
-    public function getHistoryByTransactionId(int $transactionId): array
+    private function isDuplicateEntry(PDOException $e): bool
     {
-        return $this->delegate->getHistoryByTransactionId($transactionId);
-    }
-
-    public function getHistoryByOrderId(int $orderId): array
-    {
-        return $this->delegate->getHistoryByOrderId($orderId);
-    }
-
-    public function listAuditLogs(array $filters, int $limit, int $offset): array
-    {
-        return $this->delegate->listAuditLogs($filters, $limit, $offset);
-    }
-
-    public function isEventProcessed(string $idempotencyKey): bool
-    {
-        return $this->delegate->isEventProcessed($idempotencyKey);
-    }
-
-    public function transaction(callable $operation): mixed
-    {
-        return $this->delegate->transaction($operation);
-    }
-
-    private function isMySqlDuplicateEntry(PDOException $e): bool
-    {
-        $sqlState = (string)$e->getCode();
-        $driverCode = isset($e->errorInfo[1]) ? (int)$e->errorInfo[1] : 0;
-        return $sqlState === '23000' && $driverCode === 1062;
+        $sqlState = isset($e->errorInfo[0]) ? (string)$e->errorInfo[0] : (string)$e->getCode();
+        $driverCode = isset($e->errorInfo[1]) ? (int)$e->errorInfo[1] : (is_numeric($e->getCode()) ? (int)$e->getCode() : 0);
+        return $sqlState === '23000' || $driverCode === 1062 || (string)$e->getCode() === '23000';
     }
 
     private function positiveInt(mixed $value): int
     {
-        if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
-            throw new \InvalidArgumentException('Payment transaction identifier must be a positive integer.');
-        }
+        if (!is_int($value) && !(is_string($value) && ctype_digit($value))) throw new \InvalidArgumentException('Payment transaction identifier must be a positive integer.');
         $value = (int)$value;
-        if ($value < 1) {
-            throw new \InvalidArgumentException('Payment transaction identifier must be a positive integer.');
-        }
+        if ($value < 1) throw new \InvalidArgumentException('Payment transaction identifier must be a positive integer.');
         return $value;
     }
 
     private function requiredString(mixed $value, int $max): string
     {
-        if (!is_string($value)) {
-            throw new \InvalidArgumentException('Audit value must be a string.');
-        }
+        if (!is_string($value)) throw new \InvalidArgumentException('Audit value must be a string.');
         $value = trim($value);
-        if ($value === '' || strlen($value) > $max) {
-            throw new \InvalidArgumentException('Invalid audit string.');
-        }
+        if ($value === '' || strlen($value) > $max) throw new \InvalidArgumentException('Invalid audit string.');
         return $value;
     }
 
