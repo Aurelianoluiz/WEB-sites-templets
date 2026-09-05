@@ -55,7 +55,8 @@ jobs:
       CM_MYSQL_CONCURRENCY_TIMEOUT: '45'
       CM_MYSQL_EXPECTED_STOCK_MOVEMENT_DELTA: '1'
       CM_WEBHOOK_URL: http://127.0.0.1:8081/webhooks/webhook_handler.php
-      CM_WEBHOOK_SECRET: ci-webhook-secret
+      MP_WEBHOOK_SECRET: ci-webhook-secret
+      MP_WEBHOOK_MAX_SKEW: '300'
       MP_ACCESS_TOKEN: ci-test-token
       MP_API_BASE: http://127.0.0.1:8080/v1
 
@@ -115,12 +116,18 @@ jobs:
         run: |
           set -euo pipefail
           for i in {1..30}; do
-            if curl -fsS -o /dev/null -X POST http://127.0.0.1:8081/webhooks/webhook_handler.php || true; then
-              if curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8081/webhooks/webhook_handler.php | grep -Eq '401|422|200|405'; then exit 0; fi
+            if ! kill -0 "$(pgrep -f 'php -S 127.0.0.1:8081' | head -n1)" 2>/dev/null; then
+              sleep 1
+              continue
             fi
+            code="$(curl -sS -o /tmp/cm-webhook-probe.out -w '%{http_code}' -X POST http://127.0.0.1:8081/webhooks/webhook_handler.php || true)"
+            if [[ "$code" =~ ^(401|422|200|405)$ ]]; then exit 0; fi
             sleep 1
           done
+          echo '--- webhook server log ---'
           cat /tmp/cm-webhook.log || true
+          echo '--- provider stub log ---'
+          cat /tmp/cm-mp.log || true
           exit 1
 
       - name: PHP syntax check
