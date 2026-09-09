@@ -48,6 +48,9 @@ jobs:
       CM_MYSQL_USER: cm_comercial
       CM_MYSQL_PASSWORD: cm_comercial
       CM_MYSQL_CHARSET: utf8mb4
+      CM_MYSQL_INTEGRATION: '1'
+      CM_MYSQL_PAYMENT_ID: '1'
+      CM_MYSQL_ORDER_ID: '1'
       CM_MYSQL_EXTERNAL_REFERENCE: '1'
       CM_MYSQL_PROVIDER_PAYMENT_ID_PAID: '900001'
       CM_MYSQL_PROVIDER_PAYMENT_ID_REFUNDED: '900002'
@@ -55,6 +58,7 @@ jobs:
       CM_MYSQL_CONCURRENCY_TIMEOUT: '45'
       CM_MYSQL_EXPECTED_STOCK_MOVEMENT_DELTA: '1'
       CM_WEBHOOK_URL: http://127.0.0.1:8081/webhooks/webhook_handler.php
+      CM_WEBHOOK_SECRET: ci-webhook-secret
       MP_WEBHOOK_SECRET: ci-webhook-secret
       MP_WEBHOOK_MAX_SKEW: '300'
       MP_ACCESS_TOKEN: ci-test-token
@@ -94,11 +98,11 @@ jobs:
             PRIMARY KEY (id),
             UNIQUE KEY uq_users_email (email)
           ) ENGINE=InnoDB;
-          INSERT INTO users (id,name,email) VALUES (1,'CI Customer','ci@example.test') ON DUPLICATE KEY UPDATE name=VALUES(name);
-          INSERT INTO products (id,sku,name,price,stock_quantity,active) VALUES (1,'CI-001','CI Product',100.00,0,1) ON DUPLICATE KEY UPDATE price=VALUES(price),active=VALUES(active);
-          INSERT INTO orders (id,customer_id,status,payment_status,total_amount,currency,shipping_amount,idempotency_key) VALUES (1,1,'pending','pending',100.00,'BRL',0,'ci-order-1') ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id),status='pending',payment_status='pending',total_amount=100.00;
-          INSERT INTO order_items (id,order_id,product_id,sku,product_name,unit_price,quantity) VALUES (1,1,1,'CI-001','CI Product',100.00,1) ON DUPLICATE KEY UPDATE quantity=1,unit_price=100.00;
-          INSERT INTO payment_transactions (id,order_id,provider,provider_payment_id,external_reference,idempotency_key,status,amount,currency) VALUES (1,1,'mercadopago',NULL,'1','ci-payment-1','pending',100.00,'BRL') ON DUPLICATE KEY UPDATE provider='mercadopago',provider_payment_id=NULL,external_reference='1',status='pending',amount=100.00;
+          INSERT INTO users (id,name,email) VALUES (1,'CI Customer','ci@example.test') ON DUPLICATE KEY UPDATE name=VALUES(name),email=VALUES(email);
+          INSERT INTO products (id,sku,name,price,stock_quantity,active) VALUES (1,'CI-001','CI Product',100.00,1,1) ON DUPLICATE KEY UPDATE price=VALUES(price),active=VALUES(active),stock_quantity=1;
+          INSERT INTO orders (id,customer_id,status,payment_status,total_amount,currency,shipping_amount,idempotency_key) VALUES (1,1,'pending','pending',100.00,'BRL',0,'ci-order-1') ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id),status='pending',payment_status='pending',total_amount=100.00,shipping_amount=0,idempotency_key='ci-order-1';
+          INSERT INTO order_items (id,order_id,product_id,sku,product_name,unit_price,quantity) VALUES (1,1,1,'CI-001','CI Product',100.00,1) ON DUPLICATE KEY UPDATE quantity=1,unit_price=100.00,product_id=1;
+          INSERT INTO payment_transactions (id,order_id,provider,provider_payment_id,external_reference,idempotency_key,status,amount,currency) VALUES (1,1,'mercadopago',NULL,'1','ci-payment-1','pending',100.00,'BRL') ON DUPLICATE KEY UPDATE provider='mercadopago',provider_payment_id=NULL,external_reference='1',status='pending',amount=100.00,currency='BRL',idempotency_key='ci-payment-1';
           SQL
 
       - name: Install Composer dependencies
