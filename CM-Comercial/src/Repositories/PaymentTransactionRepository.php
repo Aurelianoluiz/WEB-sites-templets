@@ -116,10 +116,16 @@ final class PaymentTransactionRepository implements PaymentTransactionRepository
     }
     private function buildFilters(array $filters): array
     {
-        $conditions=[];$params=[];$status=$filters['status']??null;if(is_string($status)&&in_array($status,self::STATUSES,true)){$conditions[]='p.status = ?';$params[]=$status;}
+        $conditions=[];$params=[];
+        $status=$filters['status']??null;
+        if($status!==null){if(!is_string($status)||!in_array($status,self::STATUSES,true))throw new InvalidArgumentException('Unknown payment status filter.');$conditions[]='p.status = ?';$params[]=$status;}
         $provider=$filters['provider']??null;if(is_string($provider)&&trim($provider)!==''){$conditions[]='p.provider = ?';$params[]=trim($provider);}
         $customerId=$filters['customer_id']??null;if(is_numeric($customerId)&&(int)$customerId>0){$conditions[]='o.customer_id = ?';$params[]=(int)$customerId;}
         $orderId=$filters['order_id']??null;if(is_numeric($orderId)&&(int)$orderId>0){$conditions[]='p.order_id = ?';$params[]=(int)$orderId;}
+        $search=$filters['search']??null;if(is_string($search)&&trim($search)!==''){$term='%'.trim($search).'%';$conditions[]='(u.name LIKE ? OR u.email LIKE ? OR p.provider_payment_id LIKE ? OR p.external_reference LIKE ?)';array_push($params,$term,$term,$term,$term);}
+        $dateFrom=$filters['date_from']??null;if(is_string($dateFrom)&&trim($dateFrom)!==''){$conditions[]='p.created_at >= ?';$params[]=trim($dateFrom).' 00:00:00';}
+        $dateTo=$filters['date_to']??null;if(is_string($dateTo)&&trim($dateTo)!==''){$conditions[]='p.created_at < ?';$params[]=date('Y-m-d H:i:s',strtotime(trim($dateTo).' +1 day'));}
+        if(is_string($dateFrom)&&is_string($dateTo)&&trim($dateFrom)!==''&&trim($dateTo)!==''){if(strtotime(trim($dateFrom))===false||strtotime(trim($dateTo))===false||strtotime(trim($dateFrom))>strtotime(trim($dateTo)))throw new InvalidArgumentException('Invalid payment date range.');}
         return [$conditions,$params];
     }
     public function listWithFilters(array $filters,int $limit=50,int $offset=0): array
