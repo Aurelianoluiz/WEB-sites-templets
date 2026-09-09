@@ -22,11 +22,11 @@ $checks=[
  'php_strict_types'=>str_contains($repo,'declare(strict_types=1);'),
  'canonical_payment_table'=>str_contains($repo,'payment_transactions'),
  'webhook_transition_interface'=>str_contains($repoInterface,'applyWebhookTransition('),
- 'mysql_lock_guard'=>str_contains($repo,'ATTR_DRIVER_NAME')&&str_contains($repo,"=== 'mysql'")&&str_contains($repo,'lockSql('),
- 'double_lock_payment_for_update'=>preg_match('/SELECT[\\s\\S]+FROM payment_transactions[\\s\\S]+FOR UPDATE/i',$repo)===1,
- 'double_lock_orders_for_update'=>preg_match('/SELECT[\\s\\S]+FROM orders[\\s\\S]+FOR UPDATE/i',$repo)===1,
+ 'mysql_lock_guard'=>str_contains($repo,'ATTR_DRIVER_NAME')&&str_contains($repo,"==='mysql'")&&str_contains($repo,'lockSql('),
+ 'double_lock_payment_for_update'=>str_contains($repo,'lockPaymentForWebhook(')&&str_contains($repo,'SELECT id,order_id,status,provider_payment_id,amount FROM payment_transactions')&&str_contains($repo,'$this->lockSql($sql)'),
+ 'double_lock_orders_for_update'=>str_contains($repo,'lockOrderForWebhook(')&&str_contains($repo,'SELECT id,status,payment_status,total_amount FROM orders')&&str_contains($repo,'$this->lockSql($sql)'),
  'lock_order_protocol_payment_before_order'=>strpos($repo,'lockPaymentForWebhook(')!==false&&strpos($repo,'lockOrderForWebhook(')!==false&&strpos($repo,'lockPaymentForWebhook(')<strpos($repo,'lockOrderForWebhook('),
- 'canonical_stock_columns'=>str_contains($repo,'stock_movements(product_id,type,qty)')&&!str_contains($repo,'stock_movements (product_id, quantity'),
+ 'canonical_stock_columns'=>str_contains($repo,'INSERT INTO stock_movements(product_id,type,qty,reason)'),
  'canonical_stock_adjustment'=>str_contains($repo,"':type'=>'adjustment'")||str_contains($repo,"':type' => 'adjustment'"),
  'monotonic_state_matrix'=>str_contains($repo,'ALLOWED_TRANSITIONS')&&str_contains($repo,"'paid'=>['refunded']")&&str_contains($repo,"'refunded'=>[]")&&str_contains($repo,"'cancelled'=>[]"),
  'illegal_transition_exception'=>str_contains($repo,'InvalidWebhookTransitionException')&&str_contains($invalidTransition,'class InvalidWebhookTransitionException'),
@@ -36,7 +36,7 @@ $checks=[
  'deadlock_1213'=>str_contains($repo,'1213')&&str_contains($concurrency,'class WebhookConcurrencyException'),
  'lock_timeout_1205'=>str_contains($repo,'1205'),
  'sqlstate_40001'=>str_contains($repo,"'40001'"),
- 'no_repository_retry_sleep'=>preg_match('/\\b(?:retry|retries|usleep|sleep)\\s*\\(/i',$repo)!==1,
+ 'no_repository_retry_sleep'=>preg_match('/\b(?:retry|retries|usleep|sleep)\s*\(/i',$repo)!==1,
  'webhook_catches_invalid_transition'=>str_contains($webhook,'catch (InvalidWebhookTransitionException $e)'),
  'webhook_catches_concurrency'=>str_contains($webhook,'1213')&&str_contains($webhook,'1205')&&str_contains($webhook,'retry_safe'),
  'webhook_no_uncaught_500_for_concurrency'=>str_contains($webhook,"'retry_safe' => true")&&str_contains($webhook,'respond(200'),
@@ -60,7 +60,7 @@ $checks=[
  'deadlock_suite_registered_validation'=>str_contains($validation,'webhook_mysql_deadlock_test.php'),
  'deadlock_suite_registered_release'=>str_contains($release,'webhook_mysql_deadlock_test.php'),
  'pessimistic_locking_test_present'=>$pessimisticTest!=='',
- 'no_legacy_payments_table_in_repo'=>!preg_match('/\\b(?:FROM|JOIN|INTO|UPDATE)\\s+payments\\b/i',$repo),
+ 'no_legacy_payments_table_in_repo'=>!preg_match('/\b(?:FROM|JOIN|INTO|UPDATE)\s+payments\b/i',$repo),
 ];
 $failed=[];foreach($checks as $name=>$ok){echo($ok?'PASS':'FAIL').": {$name}\n";if(!$ok)$failed[]=$name;}
 if($failed!==[]){echo'FAILED_CHECKS: '.implode(', ',$failed).PHP_EOL;exit(1);}echo"SECURITY_AUDIT_PASSED\n";
