@@ -99,10 +99,10 @@ jobs:
             UNIQUE KEY uq_users_email (email)
           ) ENGINE=InnoDB;
           INSERT INTO users (id,name,email) VALUES (1,'CI Customer','ci@example.test') ON DUPLICATE KEY UPDATE name=VALUES(name),email=VALUES(email);
-          INSERT INTO products (id,sku,name,price,stock_quantity,active) VALUES (1,'CI-001','CI Product',100.00,1,1) ON DUPLICATE KEY UPDATE price=VALUES(price),active=VALUES(active),stock_quantity=1;
-          INSERT INTO orders (id,customer_id,status,payment_status,total_amount,currency,shipping_amount,idempotency_key) VALUES (1,1,'pending','pending',100.00,'BRL',0,'ci-order-1') ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id),status='pending',payment_status='pending',total_amount=100.00,shipping_amount=0,idempotency_key='ci-order-1';
-          INSERT INTO order_items (id,order_id,product_id,sku,product_name,unit_price,quantity) VALUES (1,1,1,'CI-001','CI Product',100.00,1) ON DUPLICATE KEY UPDATE quantity=1,unit_price=100.00,product_id=1;
-          INSERT INTO payment_transactions (id,order_id,provider,provider_payment_id,external_reference,idempotency_key,status,amount,currency) VALUES (1,1,'mercadopago',NULL,'1','ci-payment-1','pending',100.00,'BRL') ON DUPLICATE KEY UPDATE provider='mercadopago',provider_payment_id=NULL,external_reference='1',status='pending',amount=100.00,currency='BRL',idempotency_key='ci-payment-1';
+          INSERT INTO products (id,sku,name,price,stock_quantity,active) VALUES (1,'CI-001','CI Product',100.00,1,1),(2,'CI-002','Deadlock Product A',50.00,10,1),(3,'CI-003','Deadlock Product B',75.00,10,1) ON DUPLICATE KEY UPDATE price=VALUES(price),active=VALUES(active),stock_quantity=VALUES(stock_quantity);
+          INSERT INTO orders (id,customer_id,status,payment_status,total_amount,currency,shipping_amount,idempotency_key) VALUES (1,1,'pending','pending',100.00,'BRL',0,'ci-order-1'),(2,1,'pending','pending',200.00,'BRL',0,'ci-order-2'),(3,1,'pending','pending',300.00,'BRL',0,'ci-order-3') ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id),status='pending',payment_status='pending',shipping_amount=0;
+          INSERT INTO order_items (id,order_id,product_id,sku,product_name,unit_price,quantity) VALUES (1,1,1,'CI-001','CI Product',100.00,1),(2,2,2,'CI-002','Deadlock Product A',50.00,1),(3,3,3,'CI-003','Deadlock Product B',75.00,1) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity),unit_price=VALUES(unit_price),product_id=VALUES(product_id);
+          INSERT INTO payment_transactions (id,order_id,provider,provider_payment_id,external_reference,idempotency_key,status,amount,currency) VALUES (1,1,'mercadopago',NULL,'1','ci-payment-1','pending',100.00,'BRL'),(2,2,'mercadopago',NULL,'2','ci-payment-2','pending',200.00,'BRL'),(3,3,'mercadopago',NULL,'3','ci-payment-3','pending',300.00,'BRL') ON DUPLICATE KEY UPDATE provider='mercadopago',provider_payment_id=NULL,external_reference=VALUES(external_reference),status='pending',amount=VALUES(amount),currency='BRL',idempotency_key=VALUES(idempotency_key);
           SQL
 
       - name: Install Composer dependencies
@@ -128,9 +128,7 @@ jobs:
             if [[ "$code" =~ ^(401|422|200|405)$ ]]; then exit 0; fi
             sleep 1
           done
-          echo '--- webhook server log ---'
           cat /tmp/cm-webhook.log || true
-          echo '--- provider stub log ---'
           cat /tmp/cm-mp.log || true
           exit 1
 
