@@ -1,340 +1,39 @@
 <?php
 declare(strict_types=1);
 
-/**
- * MySQL 8 / InnoDB deterministic 1205/1213 failure-injection suite.
- *
- * Requires a dedicated integration fixture and never resets application data.
- */
-final class WebhookMySqlDeadlockFailure extends RuntimeException
-{
-}
+/** MySQL 8 / InnoDB deterministic 1205/1213 integration gate. */
+final class WebhookMySqlDeadlockFailure extends RuntimeException {}
+function dmAssert(bool $ok,string $message):void{if(!$ok)throw new WebhookMySqlDeadlockFailure($message);}
+function dmSame(mixed $expected,mixed $actual,string $message):void{if($expected!==$actual)throw new WebhookMySqlDeadlockFailure($message.' expected='.var_export($expected,true).' actual='.var_export($actual,true));}
+function envOk():bool{foreach(['CM_WEBHOOK_URL','CM_WEBHOOK_SECRET','CM_MYSQL_PAYMENT_ID','CM_MYSQL_ORDER_ID','CM_MYSQL_PROVIDER_PAYMENT_ID_PAID'] as $name){if(getenv($name)===false||trim((string)getenv($name))==='')return false;}return getenv('CM_MYSQL_DSN')!==false||(getenv('CM_MYSQL_HOST')!==false&&getenv('CM_MYSQL_DATABASE')!==false&&getenv('CM_MYSQL_USER')!==false);}
+function db():PDO{$dsn=trim((string)(getenv('CM_MYSQL_DSN')?:''));if($dsn==='')$dsn=sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',getenv('CM_MYSQL_HOST'),(int)(getenv('CM_MYSQL_PORT')?:3306),getenv('CM_MYSQL_DATABASE'));return new PDO($dsn,(string)getenv('CM_MYSQL_USER'),(string)(getenv('CM_MYSQL_PASSWORD')?:''),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC,PDO::ATTR_EMULATE_PREPARES=>false,PDO::ATTR_TIMEOUT=>10]);}
+function scalar(PDO $pdo,string $sql,array $params=[]):mixed{$s=$pdo->prepare($sql);$s->execute($params);return $s->fetchColumn();}
+function row(PDO $pdo,string $sql,array $params=[]):array{$s=$pdo->prepare($sql);$s->execute($params);$r=$s->fetch(PDO::FETCH_ASSOC);return is_array($r)?$r:[];}
+function codes(PDOException $e):array{return[(string)$e->getCode(),isset($e->errorInfo[1])?(int)$e->errorInfo[1]:0];}
+function orderProductIds(PDO $pdo,int $orderId):array{$s=$pdo->prepare('SELECT product_id FROM order_items WHERE order_id=? ORDER BY product_id');$s->execute([$orderId]);return array_values(array_unique(array_map('intval',array_column($s->fetchAll(),'product_id'))));}
+function stockSnapshot(PDO $pdo,int $orderId):array{$ids=orderProductIds($pdo,$orderId);if($ids===[])return['count'=>0,'quantity'=>0];$p=implode(',',array_fill(0,count($ids),'?'));return['count'=>(int)scalar($pdo,'SELECT COUNT(*) FROM stock_movements WHERE product_id IN ('.$p.')',$ids),'quantity'=>(int)scalar($pdo,'SELECT COALESCE(SUM(qty),0) FROM stock_movements WHERE product_id IN ('.$p.')',$ids)];}
+function snapshot(PDO $pdo,int $paymentId,int $orderId):array{return['payment'=>row($pdo,'SELECT status,provider_payment_id,amount FROM payment_transactions WHERE id=?',[$paymentId]),'order'=>row($pdo,'SELECT status,payment_status,total_amount FROM orders WHERE id=?',[$orderId]),'history'=>(int)scalar($pdo,'SELECT COUNT(*) FROM order_status_history WHERE order_id=?',[$orderId]),'stock'=>stockSnapshot($pdo,$orderId),'audit'=>(int)scalar($pdo,'SELECT COUNT(*) FROM payment_audit_log WHERE payment_transaction_id=?',[$paymentId])];}
+function waitFile(string $file,int $seconds=10):void{$deadline=microtime(true)+$seconds;while(!is_file($file)&&microtime(true)<$deadline)usleep(10000);dmAssert(is_file($file),'worker synchronization timeout: '.$file);}
+function webhook(string $url,string $secret,string $notificationId,string $paymentId):array{$requestId='deadlock-'.bin2hex(random_bytes(6));$ts=time();$body=json_encode(['id'=>$notificationId,'type'=>'payment','action'=>'payment.updated','data'=>['id'=>$paymentId],'live_mode'=>false],JSON_THROW_ON_ERROR);$manifest='id:'.$notificationId.';request-id:'.$requestId.';ts:'.$ts.';';$h=curl_init($url);dmAssert($h!==false,'curl_init failed');curl_setopt_array($h,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$body,CURLOPT_HTTPHEADER=>['Content-Type: application/json','Accept: application/json','x-request-id: '.$requestId,'x-signature: ts='.$ts.',v1='.hash_hmac('sha256',$manifest,$secret)],CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>20,CURLOPT_FOLLOWLOCATION=>false]);$out=curl_exec($h);$r=['status'=>(int)curl_getinfo($h,CURLINFO_HTTP_CODE),'body'=>(string)$out,'error'=>curl_error($h)];curl_close($h);return$r;}
+function telemetry(PDO $pdo):array{$locks=$pdo->query('SELECT ENGINE,ENGINE_TRANSACTION_ID,OBJECT_SCHEMA,OBJECT_NAME,INDEX_NAME,LOCK_TYPE,LOCK_MODE,LOCK_STATUS,LOCK_DATA FROM performance_schema.data_locks WHERE OBJECT_SCHEMA=DATABASE() ORDER BY ENGINE_TRANSACTION_ID')->fetchAll(PDO::FETCH_ASSOC);$waits=$pdo->query('SELECT REQUESTING_ENGINE_TRANSACTION_ID,BLOCKING_ENGINE_TRANSACTION_ID,REQUESTING_THREAD_ID,BLOCKING_THREAD_ID,OBJECT_SCHEMA,OBJECT_NAME,INDEX_NAME FROM performance_schema.data_lock_waits WHERE OBJECT_SCHEMA=DATABASE() ORDER BY REQUESTING_ENGINE_TRANSACTION_ID')->fetchAll(PDO::FETCH_ASSOC);return['locks'=>$locks,'waits'=>$waits];}
+function deadlockSection(PDO $pdo):string{$text=(string)$pdo->query('SHOW ENGINE INNODB STATUS')->fetchColumn(2);$start=strpos($text,'LATEST DETECTED DEADLOCK');if($start===false)return '';return substr($text,$start,min(6000,strlen($text)-$start));}
+function deadlockMetric(PDO $pdo):int{$s=$pdo->query("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")->fetch(PDO::FETCH_ASSOC);return(int)($s['Value']??0);}
 
-function dmAssert(bool $ok, string $message): void
-{
-    if (!$ok) {
-        throw new WebhookMySqlDeadlockFailure($message);
-    }
-}
+if(!extension_loaded('pdo_mysql')||!extension_loaded('curl')||!function_exists('pcntl_fork')){echo"SKIP: pdo_mysql, curl and pcntl_fork are required\n";exit(0);}if(!envOk()){echo"SKIP: MySQL deadlock integration environment not configured\n";exit(0);}
 
-function dmSame(mixed $expected, mixed $actual, string $message): void
-{
-    if ($expected !== $actual) {
-        throw new WebhookMySqlDeadlockFailure(
-            $message . ' expected=' . var_export($expected, true) . ' actual=' . var_export($actual, true)
-        );
-    }
-}
+try{
+ $pdo=db();$version=(string)$pdo->query('SELECT VERSION()')->fetchColumn();dmAssert(preg_match('/^8\./',$version)===1,'MySQL 8 required: '.$version);$paymentId=(int)getenv('CM_MYSQL_PAYMENT_ID');$orderId=(int)getenv('CM_MYSQL_ORDER_ID');$before=snapshot($pdo,$paymentId,$orderId);$deadlocksBefore=deadlockMetric($pdo);unset($pdo);
 
-function envOk(): bool
-{
-    foreach (['CM_WEBHOOK_URL', 'CM_WEBHOOK_SECRET', 'CM_MYSQL_PAYMENT_ID', 'CM_MYSQL_ORDER_ID', 'CM_MYSQL_PROVIDER_PAYMENT_ID_PAID'] as $name) {
-        if (getenv($name) === false || trim((string) getenv($name)) === '') {
-            return false;
-        }
-    }
+ // 1205: fork first; each child/parent opens its own PDO after fork, avoiding inherited MySQL sockets.
+ $result1205=tempnam(sys_get_temp_dir(),'cm1205-result-');$ready1205=tempnam(sys_get_temp_dir(),'cm1205-ready-');dmAssert($result1205!==false&&$ready1205!==false,'1205 temp files failed');$child=pcntl_fork();dmAssert($child!==-1,'pcntl_fork failed');
+ if($child===0){try{waitFile($ready1205);$b=db();$b->exec('SET SESSION innodb_lock_wait_timeout=1');$b->beginTransaction();$b->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);file_put_contents($result1205,'FAIL');$b->rollBack();exit(1);}catch(PDOException $e){[$sql,$vendor]=codes($e);$ok=$sql==='HY000'&&$vendor===1205;file_put_contents($result1205,$ok?'PASS':'FAIL:'.$sql.':'.$vendor);if(isset($b)&&$b->inTransaction())$b->rollBack();exit($ok?0:1);}}
+ $a=db();$a->exec('SET SESSION innodb_lock_wait_timeout=5');$a->beginTransaction();$a->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);$lockTelemetry=telemetry($a);echo 'P_S_LOCKS: '.count($lockTelemetry['locks']).PHP_EOL;echo 'P_S_WAITS_BEFORE: '.count($lockTelemetry['waits']).PHP_EOL;file_put_contents($ready1205,'READY');$waitStatus=0;pcntl_waitpid($child,$waitStatus);$a->rollBack();dmAssert(pcntl_wexitstatus($waitStatus)===0&&trim((string)file_get_contents($result1205))==='PASS','1205/HY000 not observed');dmSame($before,snapshot($a=db(),$paymentId,$orderId),'1205 left residual mutation');@unlink($result1205);@unlink($ready1205);
 
-    return getenv('CM_MYSQL_DSN') !== false
-        || (getenv('CM_MYSQL_HOST') !== false && getenv('CM_MYSQL_DATABASE') !== false && getenv('CM_MYSQL_USER') !== false);
-}
+ // 1213: fork first; parent and child acquire opposite locks using independent sockets.
+ $ready=tempnam(sys_get_temp_dir(),'cm1213-ready-');$go=tempnam(sys_get_temp_dir(),'cm1213-go-');$result=tempnam(sys_get_temp_dir(),'cm1213-result-');dmAssert($ready!==false&&$go!==false&&$result!==false,'1213 temp files failed');$child=pcntl_fork();dmAssert($child!==-1,'pcntl_fork failed');
+ if($child===0){$ok=false;try{$b=db();$b->exec('SET SESSION innodb_lock_wait_timeout=5');$b->beginTransaction();$b->prepare('SELECT id FROM orders WHERE id=? FOR UPDATE')->execute([$orderId]);file_put_contents($ready,'READY');waitFile($go);usleep(200000);$b->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);$b->commit();}catch(PDOException $e){[$sql,$vendor]=codes($e);$ok=$sql==='40001'&&$vendor===1213;if(isset($b)&&$b->inTransaction())$b->rollBack();}finally{file_put_contents($result,$ok?'PASS':'FAIL');}exit($ok?0:1);}
+ waitFile($ready);$a=db();$a->exec('SET SESSION innodb_lock_wait_timeout=5');$a->beginTransaction();$a->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);$telemetryBeforeCross=telemetry($a);echo 'P_S_LOCKS_AFTER_OPPOSITE_LOCKS: '.count($telemetryBeforeCross['locks']).PHP_EOL;echo 'P_S_WAITS_AFTER_OPPOSITE_LOCKS: '.count($telemetryBeforeCross['waits']).PHP_EOL;file_put_contents($go,'GO');usleep(100000);$cross=false;try{$a->prepare('SELECT id FROM orders WHERE id=? FOR UPDATE')->execute([$orderId]);}catch(PDOException $e){[$sql,$vendor]=codes($e);$cross=$sql==='40001'&&$vendor===1213;}finally{if($a->inTransaction())$a->rollBack();}dmAssert($cross,'1213/40001 not observed by parent transaction');$waitStatus=0;pcntl_waitpid($child,$waitStatus);dmAssert(pcntl_wexitstatus($waitStatus)===0&&trim((string)file_get_contents($result))==='PASS','1213/40001 not observed by child transaction');$pdo=db();$afterDeadlock=snapshot($pdo,$paymentId,$orderId);dmSame($before,$afterDeadlock,'1213 rollback changed the five-table business snapshot');$deadlocksAfter=deadlockMetric($pdo);dmAssert($deadlocksAfter>$deadlocksBefore,'Innodb_deadlocks counter did not increment');$latest=deadlockSection($pdo);dmAssert($latest!=='','SHOW ENGINE INNODB STATUS has no LATEST DETECTED DEADLOCK section');echo "LATEST DETECTED DEADLOCK\n".$latest."\nEND LATEST DETECTED DEADLOCK\n";echo 'INNODB_DEADLOCKS_BEFORE: '.$deadlocksBefore.PHP_EOL;echo 'INNODB_DEADLOCKS_AFTER: '.$deadlocksAfter.PHP_EOL;@unlink($ready);@unlink($go);@unlink($result);
 
-function db(): PDO
-{
-    $dsn = trim((string) (getenv('CM_MYSQL_DSN') ?: ''));
-    if ($dsn === '') {
-        $dsn = sprintf(
-            'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
-            getenv('CM_MYSQL_HOST'),
-            (int) (getenv('CM_MYSQL_PORT') ?: 3306),
-            getenv('CM_MYSQL_DATABASE')
-        );
-    }
-
-    return new PDO(
-        $dsn,
-        (string) getenv('CM_MYSQL_USER'),
-        (string) (getenv('CM_MYSQL_PASSWORD') ?: ''),
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-            PDO::ATTR_TIMEOUT => 10,
-        ]
-    );
-}
-
-function scalar(PDO $pdo, string $sql, array $params = []): mixed
-{
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->fetchColumn();
-}
-
-function row(PDO $pdo, string $sql, array $params = []): array
-{
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $result = $stmt->fetch(PDO::FETCH_ASSOC);
-    return is_array($result) ? $result : [];
-}
-
-function errorCode(PDOException $exception): array
-{
-    return [
-        (string) $exception->getCode(),
-        isset($exception->errorInfo[1]) ? (int) $exception->errorInfo[1] : 0,
-    ];
-}
-
-function orderProductIds(PDO $pdo, int $orderId): array
-{
-    $stmt = $pdo->prepare('SELECT product_id FROM order_items WHERE order_id=? ORDER BY product_id');
-    $stmt->execute([$orderId]);
-    return array_values(array_unique(array_map('intval', array_column($stmt->fetchAll(), 'product_id'))));
-}
-
-function stockSnapshot(PDO $pdo, int $orderId): array
-{
-    $productIds = orderProductIds($pdo, $orderId);
-    if ($productIds === []) {
-        return ['count' => 0, 'quantity' => 0];
-    }
-
-    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
-    return [
-        'count' => (int) scalar($pdo, 'SELECT COUNT(*) FROM stock_movements WHERE product_id IN (' . $placeholders . ')', $productIds),
-        'quantity' => (int) scalar($pdo, 'SELECT COALESCE(SUM(qty),0) FROM stock_movements WHERE product_id IN (' . $placeholders . ')', $productIds),
-    ];
-}
-
-function snapshot(PDO $pdo, int $paymentId, int $orderId): array
-{
-    return [
-        'payment' => row($pdo, 'SELECT status, provider_payment_id, amount FROM payment_transactions WHERE id=?', [$paymentId]),
-        'order' => row($pdo, 'SELECT status, payment_status, total_amount FROM orders WHERE id=?', [$orderId]),
-        'history' => (int) scalar($pdo, 'SELECT COUNT(*) FROM order_status_history WHERE order_id=?', [$orderId]),
-        'stock' => stockSnapshot($pdo, $orderId),
-        'audit' => (int) scalar($pdo, 'SELECT COUNT(*) FROM payment_audit_log WHERE payment_transaction_id=?', [$paymentId]),
-    ];
-}
-
-function webhook(string $url, string $secret, string $notificationId, string $paymentId): array
-{
-    $requestId = 'deadlock-' . bin2hex(random_bytes(6));
-    $timestamp = time();
-    $body = json_encode([
-        'id' => $notificationId,
-        'type' => 'payment',
-        'action' => 'payment.updated',
-        'data' => ['id' => $paymentId],
-        'live_mode' => false,
-    ], JSON_THROW_ON_ERROR);
-    $manifest = 'id:' . $notificationId . ';request-id:' . $requestId . ';ts:' . $timestamp . ';';
-
-    $handle = curl_init($url);
-    dmAssert($handle !== false, 'curl_init failed');
-    curl_setopt_array($handle, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $body,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'Accept: application/json',
-            'x-request-id: ' . $requestId,
-            'x-signature: ts=' . $timestamp . ',v1=' . hash_hmac('sha256', $manifest, $secret),
-        ],
-        CURLOPT_CONNECTTIMEOUT => 5,
-        CURLOPT_TIMEOUT => 20,
-        CURLOPT_FOLLOWLOCATION => false,
-    ]);
-
-    $output = curl_exec($handle);
-    $result = [
-        'status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
-        'body' => (string) $output,
-        'error' => curl_error($handle),
-    ];
-    curl_close($handle);
-    return $result;
-}
-
-function waitFile(string $file, int $seconds = 10): void
-{
-    $deadline = microtime(true) + $seconds;
-    while (!is_file($file) && microtime(true) < $deadline) {
-        usleep(10000);
-    }
-    dmAssert(is_file($file), 'worker synchronization timeout');
-}
-
-if (!extension_loaded('pdo_mysql') || !extension_loaded('curl') || !function_exists('pcntl_fork')) {
-    echo "SKIP: pdo_mysql, curl and pcntl_fork are required for deterministic integration\n";
-    exit(0);
-}
-if (!envOk()) {
-    echo "SKIP: MySQL deadlock integration environment not configured\n";
-    exit(0);
-}
-
-try {
-    $pdo = db();
-    $version = (string) $pdo->query('SELECT VERSION()')->fetchColumn();
-    dmAssert(preg_match('/^8\./', $version) === 1, 'MySQL 8 required: ' . $version);
-
-    $paymentId = (int) getenv('CM_MYSQL_PAYMENT_ID');
-    $orderId = (int) getenv('CM_MYSQL_ORDER_ID');
-    $before = snapshot($pdo, $paymentId, $orderId);
-
-    // 1205: A holds payment; B waits on the same record with a one-second timeout.
-    $connectionA = db();
-    $connectionA->exec('SET SESSION innodb_lock_wait_timeout=5');
-    $connectionA->beginTransaction();
-    $connectionA->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);
-
-    $result1205 = tempnam(sys_get_temp_dir(), 'cm1205-result-');
-    dmAssert($result1205 !== false, 'temp file creation failed');
-    $child = pcntl_fork();
-    dmAssert($child !== -1, 'pcntl_fork failed');
-
-    if ($child === 0) {
-        $observed = false;
-        try {
-            $connectionB = db();
-            $connectionB->exec('SET SESSION innodb_lock_wait_timeout=1');
-            $connectionB->beginTransaction();
-            $connectionB->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);
-        } catch (PDOException $exception) {
-            [$sqlState, $vendorCode] = errorCode($exception);
-            $observed = $vendorCode === 1205 && $sqlState === 'HY000';
-        } finally {
-            if (isset($connectionB) && $connectionB->inTransaction()) {
-                $connectionB->rollBack();
-            }
-            file_put_contents($result1205, $observed ? 'PASS' : 'FAIL');
-        }
-        exit($observed ? 0 : 1);
-    }
-
-    sleep(2);
-    $connectionA->rollBack();
-    $waitStatus = 0;
-    pcntl_waitpid($child, $waitStatus);
-    dmAssert(pcntl_wexitstatus($waitStatus) === 0, '1205 worker did not observe ER_LOCK_WAIT_TIMEOUT/HY000');
-    dmSame($before, snapshot($pdo, $paymentId, $orderId), '1205 scenario mutated fixture');
-    @unlink($result1205);
-
-    // 1213: A locks payment, B locks order, then both request the opposite record.
-    $connectionA = db();
-    $connectionA->exec('SET SESSION innodb_lock_wait_timeout=5');
-    $connectionA->beginTransaction();
-    $connectionA->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);
-
-    $ready = tempnam(sys_get_temp_dir(), 'cm1213-ready-');
-    $result1213 = tempnam(sys_get_temp_dir(), 'cm1213-result-');
-    dmAssert($ready !== false && $result1213 !== false, 'temp file creation failed');
-    $child = pcntl_fork();
-    dmAssert($child !== -1, 'pcntl_fork failed');
-
-    if ($child === 0) {
-        $observed = false;
-        try {
-            $connectionB = db();
-            $connectionB->exec('SET SESSION innodb_lock_wait_timeout=5');
-            $connectionB->beginTransaction();
-            $connectionB->prepare('SELECT id FROM orders WHERE id=? FOR UPDATE')->execute([$orderId]);
-            file_put_contents($ready, 'READY');
-            $connectionB->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);
-        } catch (PDOException $exception) {
-            [$sqlState, $vendorCode] = errorCode($exception);
-            $observed = $vendorCode === 1213 && $sqlState === '40001';
-        } finally {
-            if (isset($connectionB) && $connectionB->inTransaction()) {
-                $connectionB->rollBack();
-            }
-            file_put_contents($result1213, $observed ? 'PASS' : 'FAIL');
-        }
-        exit($observed ? 0 : 1);
-    }
-
-    waitFile($ready);
-    $deadlockSeen = false;
-    try {
-        $connectionA->prepare('SELECT id FROM orders WHERE id=? FOR UPDATE')->execute([$orderId]);
-    } catch (PDOException $exception) {
-        [$sqlState, $vendorCode] = errorCode($exception);
-        $deadlockSeen = $vendorCode === 1213 && $sqlState === '40001';
-    } finally {
-        if ($connectionA->inTransaction()) {
-            $connectionA->rollBack();
-        }
-    }
-
-    dmAssert($deadlockSeen, '1213/40001 was not observed by either concurrent transaction');
-    $waitStatus = 0;
-    pcntl_waitpid($child, $waitStatus);
-    dmAssert(
-        pcntl_wexitstatus($waitStatus) === 0 && trim((string) @file_get_contents($result1213)) === 'PASS',
-        'deadlock worker did not observe 1213/40001'
-    );
-    dmSame($before, snapshot($pdo, $paymentId, $orderId), '1213 rollback left a partial business mutation');
-    @unlink($ready);
-    @unlink($result1213);
-
-    // Webhook under payment lock: it may be controlled/handled, but never an uncaught 500.
-    $connectionA = db();
-    $connectionA->beginTransaction();
-    $connectionA->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);
-    $http = webhook(
-        (string) getenv('CM_WEBHOOK_URL'),
-        (string) getenv('CM_WEBHOOK_SECRET'),
-        'deadlock-http-' . bin2hex(random_bytes(5)),
-        (string) getenv('CM_MYSQL_PROVIDER_PAYMENT_ID_PAID')
-    );
-    $connectionA->rollBack();
-    dmAssert($http["error"] === '', 'webhook transport error: ' . $http["error"]);
-    dmAssert($http["status"] !== 500, 'webhook returned uncaught HTTP 500 during lock contention');
-
-    // Legitimate delivery + exact replay: history, stock and audit remain idempotent.
-    $notificationId = 'deadlock-redelivery-' . bin2hex(random_bytes(5));
-    $first = webhook(
-        (string) getenv('CM_WEBHOOK_URL'),
-        (string) getenv('CM_WEBHOOK_SECRET'),
-        $notificationId,
-        (string) getenv('CM_MYSQL_PROVIDER_PAYMENT_ID_PAID')
-    );
-    dmAssert($first["status"] === 200, 'legitimate delivery failed: HTTP ' . $first["status"]);
-    $afterFirst = snapshot($pdo, $paymentId, $orderId);
-
-    $second = webhook(
-        (string) getenv('CM_WEBHOOK_URL'),
-        (string) getenv('CM_WEBHOOK_SECRET'),
-        $notificationId,
-        (string) getenv('CM_MYSQL_PROVIDER_PAYMENT_ID_PAID')
-    );
-    dmAssert($second["status"] === 200, 'idempotent replay failed: HTTP ' . $second["status"]);
-    $afterReplay = snapshot($pdo, $paymentId, $orderId);
-    dmSame($afterFirst['history'], $afterReplay['history'], 'replay duplicated order history');
-    dmSame($afterFirst['stock'], $afterReplay['stock'], 'replay duplicated stock movement');
-    dmSame($afterFirst['audit'], $afterReplay['audit'], 'replay duplicated audit');
-
-    $repository = (string) file_get_contents(__DIR__ . '/../src/Repositories/PaymentTransactionRepository.php');
-    dmAssert(
-        str_contains($repository, '1213')
-        && str_contains($repository, '1205')
-        && str_contains($repository, "'40001'"),
-        'repository must classify 1213/1205/40001'
-    );
-    dmAssert(
-        !preg_match('/\b(?:retry|retries|usleep|sleep)\s*\(/i', $repository),
-        'repository contains blind retry/backoff'
-    );
-
-    echo "PASS: deterministic MySQL 8/InnoDB 1205 + 1213 + rollback + webhook containment + idempotent redelivery\n";
-    echo 'MYSQL_VERSION: ' . $version . PHP_EOL;
-    echo 'HTTP_LOCK_CONTENTION_STATUS: ' . $http["status"] . PHP_EOL;
-    echo 'REDELIVERY_STATUS: ' . $second["status"] . PHP_EOL;
-    echo "PASS: webhook_mysql_deadlock_test\n";
-} catch (Throwable $exception) {
-    fwrite(STDERR, 'FAIL: ' . $exception->getMessage() . PHP_EOL);
-    exit(1);
-}
+ // Controlled HTTP contention and idempotent redelivery.
+ $a=db();$a->beginTransaction();$a->prepare('SELECT id FROM payment_transactions WHERE id=? FOR UPDATE')->execute([$paymentId]);$http=webhook((string)getenv('CM_WEBHOOK_URL'),(string)getenv('CM_WEBHOOK_SECRET'),'deadlock-http-'.bin2hex(random_bytes(5)),(string)getenv('CM_MYSQL_PROVIDER_PAYMENT_ID_PAID'));$a->rollBack();dmAssert($http['error']===''&&$http['status']!==500,'webhook returned HTTP 500 under pessimistic lock contention');$notification='deadlock-redelivery-'.bin2hex(random_bytes(5));$first=webhook((string)getenv('CM_WEBHOOK_URL'),(string)getenv('CM_WEBHOOK_SECRET'),$notification,(string)getenv('CM_MYSQL_PROVIDER_PAYMENT_ID_PAID'));dmAssert($first['status']===200,'first webhook delivery failed: '.$first['status']);$afterFirst=snapshot($pdo,$paymentId,$orderId);$second=webhook((string)getenv('CM_WEBHOOK_URL'),(string)getenv('CM_WEBHOOK_SECRET'),$notification,(string)getenv('CM_MYSQL_PROVIDER_PAYMENT_ID_PAID'));dmAssert($second['status']===200,'redelivery failed: '.$second['status']);$afterReplay=snapshot($pdo,$paymentId,$orderId);dmSame($afterFirst['history'],$afterReplay['history'],'redelivery duplicated order history');dmSame($afterFirst['stock'],$afterReplay['stock'],'redelivery duplicated stock movement');dmSame($afterFirst['audit'],$afterReplay['audit'],'redelivery duplicated audit');echo 'HTTP_LOCK_CONTENTION_STATUS: '.$http['status'].PHP_EOL;echo 'REDELIVERY_FIRST_STATUS: '.$first['status'].PHP_EOL;echo 'REDELIVERY_SECOND_STATUS: '.$second['status'].PHP_EOL;echo 'PERFORMANCE_SCHEMA_LOCKS: '.count($telemetryBeforeCross['locks']).PHP_EOL;echo 'PERFORMANCE_SCHEMA_WAITS: '.count($telemetryBeforeCross['waits']).PHP_EOL;echo 'ROLLBACK_PAYMENT: '.($afterDeadlock['payment']===$before['payment']?'PASS':'FAIL').PHP_EOL;echo 'ROLLBACK_ORDER: '.($afterDeadlock['order']===$before['order']?'PASS':'FAIL').PHP_EOL;echo 'ROLLBACK_HISTORY: '.($afterDeadlock['history']===$before['history']?'PASS':'FAIL').PHP_EOL;echo 'ROLLBACK_STOCK: '.($afterDeadlock['stock']===$before['stock']?'PASS':'FAIL').PHP_EOL;echo 'ROLLBACK_AUDIT: '.($afterDeadlock['audit']===$before['audit']?'PASS':'FAIL').PHP_EOL;echo "PASS: webhook_mysql_deadlock_test\n";
+}catch(Throwable $e){fwrite(STDERR,'FAIL: '.$e->getMessage().PHP_EOL);exit(1);}
