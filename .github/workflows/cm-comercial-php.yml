@@ -84,14 +84,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mysql -h 127.0.0.1 -P 3306 -ucm_comercial -pcm_comercial cm_comercial < CM-Comercial/database/schema.sql
-          mysql -h 127.0.0.1 -P 3306 -ucm_comercial -pcm_comercial cm_comercial <<'SQL'
+          mysql -h 127.0.0.1 -P 3306 -uroot -proot cm_comercial < CM-Comercial/database/schema.sql
+          mysql -h 127.0.0.1 -P 3306 -uroot -proot cm_comercial <<'SQL'
           CREATE TABLE IF NOT EXISTS users (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,name VARCHAR(180) NOT NULL,email VARCHAR(255) NOT NULL,PRIMARY KEY (id),UNIQUE KEY uq_users_email (email)) ENGINE=InnoDB;
           INSERT INTO users (id,name,email) VALUES (1,'CI Customer','ci@example.test') ON DUPLICATE KEY UPDATE name=VALUES(name),email=VALUES(email);
           INSERT INTO products (id,sku,name,price,stock_quantity,active) VALUES (1,'CI-001','CI Product',100.00,1,1),(2,'CI-002','Deadlock Product A',50.00,10,1),(3,'CI-003','Deadlock Product B',75.00,10,1) ON DUPLICATE KEY UPDATE price=VALUES(price),active=VALUES(active),stock_quantity=VALUES(stock_quantity);
           INSERT INTO orders (id,customer_id,status,payment_status,total_amount,currency,shipping_amount,idempotency_key) VALUES (1,1,'pending','pending',100.00,'BRL',0,'ci-order-1'),(2,1,'pending','pending',200.00,'BRL',0,'ci-order-2'),(3,1,'pending','pending',300.00,'BRL',0,'ci-order-3') ON DUPLICATE KEY UPDATE customer_id=VALUES(customer_id),status='pending',payment_status='pending',shipping_amount=0;
           INSERT INTO order_items (id,order_id,product_id,sku,product_name,unit_price,quantity) VALUES (1,1,1,'CI-001','CI Product',100.00,1),(2,2,2,'CI-002','Deadlock Product A',50.00,1),(3,3,3,'CI-003','Deadlock Product B',75.00,1) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity),unit_price=VALUES(unit_price),product_id=VALUES(product_id);
           INSERT INTO payment_transactions (id,order_id,provider,provider_payment_id,external_reference,idempotency_key,status,amount,currency) VALUES (1,1,'mercadopago',NULL,'1','ci-payment-1','pending',100.00,'BRL'),(2,2,'mercadopago',NULL,'2','ci-payment-2','pending',200.00,'BRL'),(3,3,'mercadopago',NULL,'3','ci-payment-3','pending',300.00,'BRL') ON DUPLICATE KEY UPDATE provider='mercadopago',provider_payment_id=NULL,external_reference=VALUES(external_reference),status='pending',amount=VALUES(amount),currency='BRL',idempotency_key=VALUES(idempotency_key);
+          SQL
+          mysql -h 127.0.0.1 -P 3306 -uroot -proot <<'SQL'
+          GRANT PROCESS ON *.* TO 'cm_comercial'@'%';
+          GRANT SELECT ON performance_schema.* TO 'cm_comercial'@'%';
+          FLUSH PRIVILEGES;
           SQL
       - name: Install Composer dependencies
         working-directory: CM-Comercial
