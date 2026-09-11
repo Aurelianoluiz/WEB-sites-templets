@@ -5,6 +5,7 @@ $container = require dirname(__DIR__) . '/bootstrap.php';
 
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\InvalidWebhookTransitionException;
+use App\Exceptions\WebhookConcurrencyException;
 use App\Repositories\PaymentAuditRepositoryInterface;
 use App\Repositories\PaymentTransactionRepositoryInterface;
 use App\Security\WebhookValidator;
@@ -23,10 +24,18 @@ $isInnoDbConcurrencyError = static function (Throwable $error): bool {
     for ($current = $error; $current !== null; $current = $current->getPrevious()) {
         $message = $current->getMessage();
         $code = (int)$current->getCode();
-        $sqlState = $current instanceof PDOException ? (string)$current->errorInfo[0] ?? '' : '';
-        if ($code === 1213 || $code === 1205 || $sqlState === '40001' || str_contains($message, 'SQLSTATE[40001]')
+        if ($code === 1213 || $code === 1205 || str_contains($message, '1213') || str_contains($message, '1205')
+            || str_contains($message, 'SQLSTATE[40001]') || str_contains($message, 'SQLSTATE[HY000]')
             || str_contains($message, 'Deadlock found') || str_contains($message, 'Lock wait timeout exceeded')) {
             return true;
+        }
+        if ($current instanceof PDOException) {
+            $info = $current->errorInfo;
+            $sqlState = is_array($info) && isset($info[0]) ? (string)$info[0] : '';
+            $driverCode = is_array($info) && isset($info[1]) ? (int)$info[1] : 0;
+            if ($driverCode === 1213 || $driverCode === 1205 || $sqlState === '40001') {
+                return true;
+            }
         }
     }
     return false;
@@ -174,6 +183,9 @@ try {
 } catch (InvalidWebhookTransitionException $e) {
     error_log('[cm-comercial webhook state] invalid transition rejected');
     $respond(200, ['received' => true, 'idempotent' => true, 'state_rejected' => true]);
+} catch (WebhookConcurrencyException $e) {
+    error_log('[cm-comercial webhook concurrency] explicit InnoDB concurrency exception handled');
+    $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
 } catch (Throwable $e) {
     if ($isInnoDbConcurrencyError($e)) {
         // The repository transaction wrapper has already rolled back. Never retry
@@ -187,5 +199,20 @@ try {
         $respond(422, ['received' => false, 'error' => 'invalid_payload']);
     }
     error_log('[cm-comercial webhook] ' . $e->getMessage());
+    if (getenv('CI') === 'true') {
+        $previous = $e->getPrevious();
+        $respond(500, [
+            'received' => false,
+            'error' => 'processing_failed',
+            'diagnostic' => [
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'previous_exception' => $previous !== null ? get_class($previous) : null,
+                'previous_message' => $previous?->getMessage(),
+                'previous_code' => $previous?->getCode(),
+            ],
+        ]);
+    }
     $respond(500, ['received' => false, 'error' => 'processing_failed']);
 }
