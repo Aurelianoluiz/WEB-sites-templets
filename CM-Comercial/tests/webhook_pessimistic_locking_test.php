@@ -13,7 +13,7 @@ $checks=[
  'refunded_is_terminal'=>str_contains($repository,"'refunded'=>[]"),
  'transaction_boundary_available'=>str_contains($handler,'$auditRepository->transaction('),
  'concurrency_1213_1205_handled'=>str_contains($handler,'1213')&&str_contains($handler,'1205')&&str_contains($handler,'40001'),
- 'no_blind_retry'=>str_contains($handler,'Never retry'),
+ 'no_blind_retry'=>!preg_match('/\b(?:sleep|usleep)\s*\(/i',$handler)&&!str_contains($handler,'retry_count'),
  'controlled_concurrency_response'=>str_contains($handler,"'retry_safe' => true"),
  'no_sql_in_handler'=>!preg_match('/\b(?:SELECT|INSERT|UPDATE|DELETE)\b\s+(?:FROM|INTO|SET|WHERE|JOIN)/i',$handler),
 ];
