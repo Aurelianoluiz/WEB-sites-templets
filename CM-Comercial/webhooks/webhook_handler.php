@@ -127,9 +127,6 @@ try {
             return ['duplicate' => true];
         }
 
-        // findByExternalReference(..., true) is the pessimistic lock acquisition.
-        // It executes SELECT ... FOR UPDATE on MySQL while this transaction owns
-        // the row lock, preventing concurrent state-machine decisions.
         $payment = $transactionRepository->findByExternalReference($externalReference, true);
         if ($payment === null) {
             throw new RuntimeException('Internal payment transaction not found.');
@@ -188,9 +185,6 @@ try {
     $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
 } catch (Throwable $e) {
     if ($isInnoDbConcurrencyError($e)) {
-        // The repository transaction wrapper has already rolled back. Never retry
-        // inside the request: the gateway can safely redeliver and idempotency will
-        // arbitrate the next attempt without duplicating side effects.
         error_log('[cm-comercial webhook concurrency] InnoDB 1213/1205 handled after rollback');
         $respond(200, ['received' => true, 'idempotent' => true, 'retry_safe' => true]);
     }
@@ -199,20 +193,5 @@ try {
         $respond(422, ['received' => false, 'error' => 'invalid_payload']);
     }
     error_log('[cm-comercial webhook] ' . $e->getMessage());
-    if (getenv('CI') === 'true') {
-        $previous = $e->getPrevious();
-        $respond(500, [
-            'received' => false,
-            'error' => 'processing_failed',
-            'diagnostic' => [
-                'exception' => get_class($e),
-                'message' => $e->getMessage(),
-                'code' => $e->getCode(),
-                'previous_exception' => $previous !== null ? get_class($previous) : null,
-                'previous_message' => $previous?->getMessage(),
-                'previous_code' => $previous?->getCode(),
-            ],
-        ]);
-    }
     $respond(500, ['received' => false, 'error' => 'processing_failed']);
 }
