@@ -21,7 +21,9 @@ final class WebhookValidator
 
     /**
      * Mercado Pago x-signature format: ts=<unix>;v1=<hex-hmac>.
-     * Manifest: id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+     * Current webhook schema signs the top-level notification id:
+     * id:<notification-id>;request-id:<x-request-id>;ts:<ts>;
+     * Legacy fixtures without a top-level id fall back to data.id.
      */
     public function validate(string $rawBody, array $headers): bool
     {
@@ -30,9 +32,11 @@ final class WebhookValidator
         $ts = $this->extractPart($signature, 'ts');
         $v1 = strtolower($this->extractPart($signature, 'v1'));
         $body = json_decode($rawBody, true);
+        $notificationId = is_array($body) ? trim((string)($body['id'] ?? '')) : '';
         $dataId = is_array($body) ? trim((string)($body['data']['id'] ?? '')) : '';
+        $manifestId = $notificationId !== '' ? $notificationId : $dataId;
 
-        if ($ts === '' || $v1 === '' || $requestId === '' || $dataId === '' || !ctype_digit($ts)) {
+        if ($ts === '' || $v1 === '' || $requestId === '' || $manifestId === '' || !ctype_digit($ts)) {
             return false;
         }
         if (!preg_match('/^[a-f0-9]{64}$/', $v1)) {
@@ -44,7 +48,7 @@ final class WebhookValidator
             return false;
         }
 
-        $manifest = 'id:' . $dataId . ';request-id:' . $requestId . ';ts:' . $ts . ';';
+        $manifest = 'id:' . $manifestId . ';request-id:' . $requestId . ';ts:' . $ts . ';';
         $expected = hash_hmac('sha256', $manifest, $this->secret);
         return hash_equals($expected, $v1);
     }
@@ -53,9 +57,7 @@ final class WebhookValidator
     {
         foreach (explode(',', $signature) as $part) {
             [$key, $value] = array_pad(explode('=', trim($part), 2), 2, '');
-            if (trim($key) === $name) {
-                return trim($value);
-            }
+            if (trim($key) === $name) return trim($value);
         }
         return '';
     }
