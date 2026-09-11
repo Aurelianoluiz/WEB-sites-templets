@@ -56,6 +56,7 @@ jobs:
       CM_MYSQL_STRESS_REQUESTS: '32'
       CM_MYSQL_CONCURRENCY_TIMEOUT: '45'
       CM_MYSQL_EXPECTED_STOCK_MOVEMENT_DELTA: '1'
+      CM_MYSQL_LOCK_WAIT_TIMEOUT: '1'
       CM_WEBHOOK_URL: http://127.0.0.1:8081/webhooks/webhook_handler.php
       CM_WEBHOOK_SECRET: ci-webhook-secret
       MP_WEBHOOK_SECRET: ci-webhook-secret
