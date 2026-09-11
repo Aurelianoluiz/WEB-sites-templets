@@ -25,6 +25,14 @@ final class Database
                 PDO::ATTR_EMULATE_PREPARES => false,
                 PDO::ATTR_STRINGIFY_FETCHES => false,
             ]);
+
+            $lockWaitTimeout = trim((string)(getenv('CM_MYSQL_LOCK_WAIT_TIMEOUT') ?: ''));
+            if ($lockWaitTimeout !== '' && ctype_digit($lockWaitTimeout)) {
+                $seconds = (int)$lockWaitTimeout;
+                if ($seconds >= 1 && $seconds <= 50) {
+                    $this->pdo->exec('SET SESSION innodb_lock_wait_timeout=' . $seconds);
+                }
+            }
         } catch (PDOException $e) {
             throw new RuntimeException('Database connection failed.', 0, $e);
         }
